@@ -4,6 +4,7 @@ import { UserRepository } from '../repositories/user.repository'
 import { UserService } from '../services/user.service'
 import { UserController } from '../controllers/user.controller'
 import { PushNotificationService } from '@/core/services/push-notification.service'
+import { ServiceRepository } from '@/modules/consultation/repositories/service.repository'
 import { authenticate } from '@/modules/auth'
 import { INTEREST_OPTIONS } from '../schemas/user.schema'
 
@@ -11,7 +12,8 @@ export async function userRoutes(app: FastifyInstance) {
   // Dependency injection
   const db = getDb()
   const userRepository = new UserRepository(db)
-  const userService = new UserService(userRepository)
+  const serviceRepository = new ServiceRepository(db)
+  const userService = new UserService(userRepository, serviceRepository)
   const pushNotificationService = new PushNotificationService(db)
   const userController = new UserController(userService, pushNotificationService)
 

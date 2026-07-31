@@ -1,4 +1,4 @@
-import { eq, desc, asc, sql, and } from 'drizzle-orm'
+import { eq, desc, asc, sql, and, getTableColumns } from 'drizzle-orm'
 import type { Database } from '@/core/database/client'
 import { posts, postLikes, postComments, users } from '@/core/database/schema'
 import type { NewPost, NewPostComment } from '@/core/database/schema/posts'
@@ -21,7 +21,7 @@ export class PostsRepository {
   // correlated subqueries se, ek hi query mein (feed page-size par N+1 nahi banta)
   private statsSelect(viewerId?: string) {
     return {
-      ...posts,
+      ...getTableColumns(posts),
       likesCount: sql<number>`(SELECT COUNT(*)::int FROM ${postLikes} WHERE ${postLikes.postId} = ${posts.id})`,
       commentsCount: sql<number>`(SELECT COUNT(*)::int FROM ${postComments} WHERE ${postComments.postId} = ${posts.id})`,
       isLikedByMe: viewerId
