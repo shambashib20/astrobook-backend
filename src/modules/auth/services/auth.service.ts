@@ -50,7 +50,7 @@ export class AuthService {
 
   // ── Send OTP ────────────────────────────────────────────────────────────────
 
-  async sendOtp(phone: string): Promise<void> {
+  async sendOtp(phone: string): Promise<{ otp: string }> {
     const recentCount = await this.userRepository.countRecentOtpRequests(phone)
     if (recentCount >= 3) {
       throw RateLimitError('Bahut zyada OTP requests. 10 min baad try karo.')
@@ -62,6 +62,8 @@ export class AuthService {
 
     await this.userRepository.createOtp(phone, otpHash, expiresAt)
     await sendOtpSms(phone, otp)
+
+    return { otp }
   }
 
   // ── Verify OTP ──────────────────────────────────────────────────────────────
@@ -233,6 +235,8 @@ export class AuthService {
       role:        user.role,
       isOnboarded: user.isOnboarded,
       isAstrologer: user.isAstrologer,
+      avatarUrl:   user.avatarUrl ?? null,
+      bio:         user.bio ?? null,
     }
   }
 }

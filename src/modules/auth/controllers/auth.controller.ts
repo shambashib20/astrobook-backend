@@ -1,6 +1,7 @@
 import type { FastifyRequest, FastifyReply } from 'fastify'
 import type { AuthService } from '../services/auth.service'
 import { SendOtpSchema, VerifyOtpSchema, RefreshTokenSchema, LogoutSchema, GoogleLoginSchema } from '../schemas/auth.schema'
+import { env } from '@/config/env'
 
 export class AuthController {
   constructor(private readonly authService: AuthService) {}
@@ -8,8 +9,13 @@ export class AuthController {
   // POST /auth/send-otp
   sendOtp = async (request: FastifyRequest, reply: FastifyReply) => {
     const { phone } = SendOtpSchema.parse(request.body)
-    await this.authService.sendOtp(phone)
-    return reply.status(200).send({ success: true })
+    const { otp } = await this.authService.sendOtp(phone)
+    // SHOW_OTP_IN_RESPONSE sirf test/staging servers ke liye — production
+    // .env mein yeh flag kabhi set nahi karna.
+    return reply.status(200).send({
+      success: true,
+      data: env.SHOW_OTP_IN_RESPONSE ? { debugOtp: otp } : {},
+    })
   }
 
   // POST /auth/verify-otp
@@ -63,6 +69,8 @@ export class AuthController {
           role: currentUser.role,
           isOnboarded: currentUser.isOnboarded,
           isAstrologer: currentUser.isAstrologer,
+          avatarUrl: currentUser.avatarUrl ?? null,
+          bio: currentUser.bio ?? null,
         },
       },
     })

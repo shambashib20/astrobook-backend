@@ -101,6 +101,8 @@ export async function userRoutes(app: FastifyInstance) {
               interests: { type: ['array', 'null'], items: { type: 'string' } },
               isOnboarded: { type: 'boolean' },
               isAstrologer: { type: 'boolean' },
+              avatarUrl: { type: ['string', 'null'] },
+              bio: { type: ['string', 'null'] },
               createdAt: { type: 'string' },
               updatedAt: { type: 'string' },
             },
@@ -126,6 +128,8 @@ export async function userRoutes(app: FastifyInstance) {
             name: { type: 'string', minLength: 2 },
             dateOfBirth: { type: 'string' },
             interests: { type: 'array', items: { type: 'string' } },
+            avatarUrl: { type: 'string' },
+            bio: { type: 'string', maxLength: 500 },
           },
         },
         response: {

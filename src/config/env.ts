@@ -24,6 +24,11 @@ const envSchema = z.object({
   // MSG91 — OTP SMS
   MSG91_AUTH_KEY: z.string().optional(),
   MSG91_TEMPLATE_ID: z.string().optional(),
+  // Test/staging servers pe jahan SMS actually deliver nahi ho raha (MSG91
+  // credits/DND issue), yeh true karne se /auth/send-otp response mein hi
+  // OTP wapas aa jaata hai taaki QA manually enter kar sake. PRODUCTION mein
+  // yeh kabhi true na ho — default false hai.
+  SHOW_OTP_IN_RESPONSE: z.coerce.boolean().default(false),
 
   // Google OAuth
   GOOGLE_CLIENT_ID: z.string().optional(),

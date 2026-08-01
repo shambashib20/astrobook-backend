@@ -17,6 +17,8 @@ export const UpdateProfileSchema = z.object({
   name:        z.string().min(2).max(255).optional(),
   dateOfBirth: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
   interests:   z.array(z.string()).optional(),
+  avatarUrl:   z.string().url().optional(),
+  bio:         z.string().max(500).optional(),
 })
 
 export const UserResponseSchema = z.object({
@@ -29,6 +31,8 @@ export const UserResponseSchema = z.object({
   interests:   z.array(z.string()).nullable(),
   isOnboarded: z.boolean(),
   isAstrologer: z.boolean(),
+  avatarUrl:   z.string().nullable(),
+  bio:         z.string().nullable(),
   createdAt:   z.date(),
   updatedAt:   z.date(),
 })

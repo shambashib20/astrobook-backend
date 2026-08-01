@@ -31,6 +31,7 @@ export const users = pgTable('users', {
   isAstrologer: boolean('is_astrologer').notNull().default(false),
   googleId:     varchar('google_id', { length: 128 }).unique(),  // Google login ke liye
   avatarUrl:    text('avatar_url'),
+  bio:          text('bio'),                                     // regular user ka apna bio — astrologerProfiles.bio se alag
   meta:         jsonb('meta').$type<any>(),
   createdAt:    timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   updatedAt:    timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
