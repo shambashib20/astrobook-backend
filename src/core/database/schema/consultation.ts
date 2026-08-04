@@ -49,10 +49,11 @@ export const consultationServices = pgTable('consultation_services', {
     .notNull()
     .references(() => users.id, { onDelete: 'cascade' }),
   // Platform har naye astrologer ke liye ek Basic consultancy auto-create
-  // karta hai (upgradeToAstrologer flow mein) — isBasic=true, koi image
-  // nahi, fixed starter price/duration jo astrologer baad mein edit kar
-  // sakta hai. Baaki saari services astrologer khud banata hai ("normal"),
-  // koi Premium/Elite tier nahi hai ab.
+  // karta hai (admin approval flow mein — jab astrologer application
+  // approve hoti hai) — isBasic=true, koi image nahi, fixed starter
+  // price/duration jo astrologer baad mein edit kar sakta hai. Baaki saari
+  // services astrologer khud banata hai ("normal"), koi Premium/Elite tier
+  // nahi hai ab.
   isBasic: boolean('is_basic').notNull().default(false),
   title: varchar('title', { length: 255 }).notNull(),
   shortDescription: varchar('short_description', { length: 500 }).notNull(),
@@ -72,6 +73,43 @@ export const consultationServices = pgTable('consultation_services', {
   updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
   meta: jsonb('meta').$type<any>(),
 })
+
+// ─── Consultation Service Variants ────────────────────────────────────────────
+// Har service (Basic ho ya astrologer-created "normal") ke saath fixed 5
+// duration variants auto-create hote hain (10/30/45/60/90 min). Astrologer
+// sirf price edit kar sakta hai, duration fixed rehta hai. 30-min wala
+// isDefault=true hota hai — user-side detail page pe yehi pre-selected
+// rehta hai, baaki 4 recommendation ke tarah niche list hote hain.
+
+export const VARIANT_DURATIONS = [10, 30, 45, 60, 90] as const
+export type VariantDurationMinutes = (typeof VARIANT_DURATIONS)[number]
+
+export const VARIANT_DEFAULT_PRICES: Record<VariantDurationMinutes, string> = {
+  10: '199',
+  30: '399',
+  45: '799',
+  60: '1099',
+  90: '1499',
+}
+
+export const consultationServiceVariants = pgTable(
+  'consultation_service_variants',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    serviceId: uuid('service_id')
+      .notNull()
+      .references(() => consultationServices.id, { onDelete: 'cascade' }),
+    durationMinutes: smallint('duration_minutes').notNull(),
+    price: numeric('price', { precision: 10, scale: 2 }).notNull(),
+    // 30-min variant — user detail page pe by default selected
+    isDefault: boolean('is_default').notNull().default(false),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    uniqueServiceDuration: unique().on(t.serviceId, t.durationMinutes),
+  }),
+)
 
 // ─── Availability Windows ────────────────────────────────────────────────────
 
@@ -112,6 +150,12 @@ export const appointments = pgTable('appointments', {
   serviceId: uuid('service_id')
     .notNull()
     .references(() => consultationServices.id, { onDelete: 'cascade' }),
+  // Kaunsa duration/price variant book hua tha (10/30/45/60/90 min) — nullable
+  // rakha hai kyunki purani appointments (variant system se pehle ki) is
+  // column ke bina hi ban chuki hain.
+  variantId: uuid('variant_id').references(() => consultationServiceVariants.id, {
+    onDelete: 'set null',
+  }),
 
   // Bundle / parent-child
   parentId: uuid('parent_id').references((): any => appointments.id, { onDelete: 'set null' }),
@@ -120,6 +164,11 @@ export const appointments = pgTable('appointments', {
   scheduledAt: timestamp('scheduled_at', { withTimezone: true }).notNull(),
   endsAt: timestamp('ends_at', { withTimezone: true }).notNull(),
   durationMinutes: smallint('duration_minutes').notNull(),
+  // Booking waqt ke variant ka price snapshot — baad mein astrologer variant
+  // ka price change kare toh bhi purani booking ka amount wahi rahe jo
+  // booking ke waqt tha. Nullable — purani appointments (variant system se
+  // pehle ki) ke liye service.price pe fallback hota hai.
+  price: numeric('price', { precision: 10, scale: 2 }),
 
   // Agora — only populated after payment
   agoraChannel: text('agora_channel'),
@@ -167,6 +216,9 @@ export const serviceRequests = pgTable('service_requests', {
   serviceId: uuid('service_id')
     .notNull()
     .references(() => consultationServices.id, { onDelete: 'cascade' }),
+  variantId: uuid('variant_id').references(() => consultationServiceVariants.id, {
+    onDelete: 'set null',
+  }),
   proposedSlot: timestamp('proposed_slot', { withTimezone: true }).notNull(),
   status: serviceRequestStatusEnum('status').notNull().default('pending'),
   // Once accepted + paid, this links to the new child appointment
@@ -182,6 +234,9 @@ export const serviceRequests = pgTable('service_requests', {
 
 export type ConsultationService = typeof consultationServices.$inferSelect
 export type NewConsultationService = typeof consultationServices.$inferInsert
+
+export type ConsultationServiceVariant = typeof consultationServiceVariants.$inferSelect
+export type NewConsultationServiceVariant = typeof consultationServiceVariants.$inferInsert
 
 export type AvailabilityWindow = typeof availabilityWindows.$inferSelect
 export type NewAvailabilityWindow = typeof availabilityWindows.$inferInsert

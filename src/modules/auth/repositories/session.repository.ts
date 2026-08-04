@@ -1,8 +1,8 @@
-import { eq, and, desc } from 'drizzle-orm'
+import { env } from '@/config/env'
 import type { Database } from '@/core/database/client'
 import { sessions } from '@/core/database/schema'
 import type { NewSession } from '@/core/database/schema'
-import { env } from '@/config/env'
+import { and, desc, eq } from 'drizzle-orm'
 
 export class SessionRepository {
   constructor(private readonly db: Database) {}

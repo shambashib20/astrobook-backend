@@ -1,22 +1,45 @@
-import { eq, and, sql, desc, inArray } from 'drizzle-orm'
+import { eq, and, sql, desc, inArray, asc } from 'drizzle-orm'
 import type { Database } from '@/core/database/client'
-import { consultationServices, users } from '@/core/database/schema'
+import {
+  consultationServices,
+  consultationServiceVariants,
+  VARIANT_DURATIONS,
+  VARIANT_DEFAULT_PRICES,
+  users,
+} from '@/core/database/schema'
 import type { CreateServiceDto, UpdateServiceDto } from '../schemas/consultation.schema'
 
 const BASIC_SERVICE_DEFAULTS = {
   title: 'Basic Consultation',
   shortDescription: 'A quick starter consultation to get to know your concerns.',
   about:
-    'This is your Basic consultation slot — a short session to discuss your questions and provide initial guidance. You can update the price and duration anytime from your dashboard.',
-  durationMinutes: 30,
-  price: '199',
+    'This is your Basic consultation slot — a short session to discuss your questions and provide initial guidance. You can update the price anytime from your dashboard.',
 } as const
+
+// 30-min variant ka default price hi service-level mirror column (backward
+// compat ke liye — browse/cart card listings isi se price dikhate hain)
+const DEFAULT_VARIANT_DURATION = 30
 
 export class ServiceRepository {
   constructor(private readonly db: Database) {}
 
+  // Har service (Basic ho ya normal) ke saath fixed 5 duration variants
+  // auto-create karta hai — 10/30/45/60/90 min, default prices ke saath.
+  // 30-min wala isDefault=true (user detail page pe pre-selected rehta hai).
+  private async createVariantsForService(serviceId: string) {
+    const rows = VARIANT_DURATIONS.map((duration) => ({
+      serviceId,
+      durationMinutes: duration,
+      price: VARIANT_DEFAULT_PRICES[duration],
+      isDefault: duration === DEFAULT_VARIANT_DURATION,
+    }))
+    return this.db.insert(consultationServiceVariants).values(rows).returning()
+  }
+
   // Astrologer khud ek nayi "normal" service banata hai — koi natural
   // uniqueness key nahi (Premium/Elite tier hata diya), har call ek nayi row.
+  // Duration/price ab service-level pe nahi liya jaata — 5 variants
+  // auto-create hote hain default prices ke saath.
   async create(astrologerId: string, dto: CreateServiceDto) {
     const [service] = await this.db
       .insert(consultationServices)
@@ -27,17 +50,20 @@ export class ServiceRepository {
         shortDescription: dto.shortDescription,
         coverImage: dto.coverImage,
         about: dto.about,
-        durationMinutes: dto.durationMinutes,
-        price: dto.price !== undefined ? String(dto.price) : null,
+        durationMinutes: DEFAULT_VARIANT_DURATION,
+        price: VARIANT_DEFAULT_PRICES[DEFAULT_VARIANT_DURATION],
         tags: dto.tags,
         isActive: true,
       })
       .returning()
-    return service!
+    const variants = await this.createVariantsForService(service!.id)
+    return { ...service!, variants }
   }
 
-  // Platform ka auto-created "Basic" consultancy — upgradeToAstrologer flow
-  // se call hota hai (koi image nahi, fixed starter price/duration).
+  // Platform ka auto-created "Basic" consultancy — admin approval flow
+  // (admin module's updateVerification) se call hota hai jab astrologer
+  // application approve hoti hai (koi image nahi). Isko bhi 5 variants milte
+  // hain jaisi kisi normal service ko milte hain.
   async createBasic(astrologerId: string) {
     const [service] = await this.db
       .insert(consultationServices)
@@ -48,17 +74,18 @@ export class ServiceRepository {
         shortDescription: BASIC_SERVICE_DEFAULTS.shortDescription,
         coverImage: null,
         about: BASIC_SERVICE_DEFAULTS.about,
-        durationMinutes: BASIC_SERVICE_DEFAULTS.durationMinutes,
-        price: BASIC_SERVICE_DEFAULTS.price,
+        durationMinutes: DEFAULT_VARIANT_DURATION,
+        price: VARIANT_DEFAULT_PRICES[DEFAULT_VARIANT_DURATION],
         tags: [],
         isActive: true,
       })
       .returning()
-    return service!
+    const variants = await this.createVariantsForService(service!.id)
+    return { ...service!, variants }
   }
 
-  // Koi bhi service edit karna (Basic ho ya normal) — astrologer sirf apni
-  // price/duration/title/etc update kar sakta hai, ownership caller checks.
+  // Service ke basic fields edit karna (title/desc/cover/about/tags) —
+  // price/duration ab variant-level pe edit hota hai, is method se nahi.
   async update(id: string, astrologerId: string, dto: UpdateServiceDto) {
     const [service] = await this.db
       .update(consultationServices)
@@ -67,8 +94,6 @@ export class ServiceRepository {
         ...(dto.shortDescription !== undefined && { shortDescription: dto.shortDescription }),
         ...(dto.coverImage !== undefined && { coverImage: dto.coverImage }),
         ...(dto.about !== undefined && { about: dto.about }),
-        ...(dto.durationMinutes !== undefined && { durationMinutes: dto.durationMinutes }),
-        ...(dto.price !== undefined && { price: String(dto.price) }),
         ...(dto.tags !== undefined && { tags: dto.tags }),
         updatedAt: sql`now()`,
       })
@@ -149,5 +174,68 @@ export class ServiceRepository {
       .orderBy(desc(consultationServices.createdAt))
       .limit(limit)
       .offset(offset)
+  }
+
+  // ── Variants ────────────────────────────────────────────────────────────
+
+  async findVariantsByService(serviceId: string) {
+    return this.db
+      .select()
+      .from(consultationServiceVariants)
+      .where(eq(consultationServiceVariants.serviceId, serviceId))
+      .orderBy(asc(consultationServiceVariants.durationMinutes))
+  }
+
+  // Cart/appointment enrichment ke liye — ek saath multiple variant ids
+  async findVariantsByIds(ids: string[]) {
+    if (ids.length === 0) return []
+    return this.db
+      .select()
+      .from(consultationServiceVariants)
+      .where(inArray(consultationServiceVariants.id, ids))
+  }
+
+  async findVariantById(id: string) {
+    const [variant] = await this.db
+      .select()
+      .from(consultationServiceVariants)
+      .where(eq(consultationServiceVariants.id, id))
+      .limit(1)
+    return variant ?? null
+  }
+
+  async findDefaultVariant(serviceId: string) {
+    const [variant] = await this.db
+      .select()
+      .from(consultationServiceVariants)
+      .where(
+        and(
+          eq(consultationServiceVariants.serviceId, serviceId),
+          eq(consultationServiceVariants.isDefault, true),
+        ),
+      )
+      .limit(1)
+    return variant ?? null
+  }
+
+  // Astrologer sirf price edit kar sakta hai — duration fixed hai
+  async updateVariantPrice(variantId: string, price: number) {
+    const [variant] = await this.db
+      .update(consultationServiceVariants)
+      .set({ price: String(price), updatedAt: sql`now()` })
+      .where(eq(consultationServiceVariants.id, variantId))
+      .returning()
+    return variant ?? null
+  }
+
+  // Default (30-min) variant ka price change ho toh service-level mirror
+  // column bhi sync rakho — purani listing/browse/cart-card queries jo
+  // seedha consultationServices.price padhte hain, unhe bina chhue kaam
+  // karte rehna chahiye.
+  async syncServiceMirrorPrice(serviceId: string, price: string) {
+    await this.db
+      .update(consultationServices)
+      .set({ price, updatedAt: sql`now()` })
+      .where(eq(consultationServices.id, serviceId))
   }
 }

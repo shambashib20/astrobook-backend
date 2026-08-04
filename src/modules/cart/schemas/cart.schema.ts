@@ -3,6 +3,10 @@ import { z } from 'zod'
 export const AddCartItemSchema = z.object({
   astrologerId: z.string().uuid(),
   serviceId: z.string().uuid(),
+  // Kaunsa duration/price variant cart mein add ho raha hai — optional
+  // (backward-compat), agar nahi diya toh service ka default (30-min)
+  // variant use ho jaata hai.
+  variantId: z.string().uuid().optional(),
 })
 
 export const SetCartSlotSchema = z.object({

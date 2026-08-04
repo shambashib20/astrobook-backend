@@ -52,13 +52,20 @@ export class BookingService {
   // ── Initiate Booking (pending — payment abhi baki) ────────────────────────
 
   async initiateBooking(userId: string, dto: CreateBookingDto): Promise<Appointment> {
-    const { astrologerId, serviceId, scheduledAt: scheduledAtIso, notes } = dto
+    const { astrologerId, serviceId, variantId, scheduledAt: scheduledAtIso, notes } = dto
 
     if (userId === astrologerId) {
       throw BadRequestError('You cannot book a consultation with yourself')
     }
 
     const service = await this.consultationService.getServiceForBooking(serviceId, astrologerId)
+
+    // Duration/price ab variant se aate hain — agar variantId nahi diya
+    // (purana client / backward-compat) toh service ka default (30-min)
+    // variant use ho jaata hai.
+    const variant = variantId
+      ? await this.consultationService.getVariantForBooking(serviceId, variantId, astrologerId)
+      : await this.consultationService.getDefaultVariant(serviceId)
 
     const scheduledAt = new Date(scheduledAtIso)
     if (isNaN(scheduledAt.getTime())) throw BadRequestError('Invalid scheduledAt datetime')
@@ -79,7 +86,7 @@ export class BookingService {
       throw BadRequestError('Requested slot is outside astrologer availability window')
     }
 
-    const durationMs = service.durationMinutes * 60 * 1000
+    const durationMs = variant.durationMinutes * 60 * 1000
     const endsAt = new Date(scheduledAt.getTime() + durationMs)
 
     // Slot conflict check
@@ -90,14 +97,18 @@ export class BookingService {
     )
     if (existing.length > 0) throw BadRequestError('This slot is already booked')
 
-    // Appointment create karo (pending)
+    // Appointment create karo (pending) — price yahin snapshot ho jaata hai
+    // taaki baad mein astrologer variant ka price change kare toh bhi is
+    // booking ka amount wahi rahe jo booking ke waqt tha.
     const appointment = await this.appointmentRepository.create({
       astrologerId,
       userId,
       serviceId,
+      variantId: variant.id,
       scheduledAt,
       endsAt,
-      durationMinutes: service.durationMinutes,
+      durationMinutes: variant.durationMinutes,
+      price: variant.price,
       status: 'pending',
       notes: notes ?? null,
     })

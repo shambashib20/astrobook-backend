@@ -20,6 +20,15 @@ export const VerifyOtpSchema = z.object({
     .regex(/^\d+$/, 'OTP sirf numbers'),
 })
 
+// ─── Admin Login (email + password) ────────────────────────────────────────
+
+export const AdminLoginSchema = z.object({
+  email: z.string().email('Valid email daalo'),
+  password: z.string().min(1, 'Password required'),
+})
+
+export type AdminLoginDto = z.infer<typeof AdminLoginSchema>
+
 // ─── Refresh Token ────────────────────────────────────────────────────────────
 
 export const RefreshTokenSchema = z.object({

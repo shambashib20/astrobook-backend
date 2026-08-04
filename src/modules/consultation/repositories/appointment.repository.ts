@@ -45,6 +45,11 @@ export class AppointmentRepository {
         scheduledAt: appointments.scheduledAt,
         endsAt: appointments.endsAt,
         durationMinutes: appointments.durationMinutes,
+        // Booking waqt ka price snapshot — astrologer baad mein variant price
+        // change kare toh bhi purani booking ka amount yehi rahega. Purani
+        // (variant-system se pehle ki) appointments ke liye null ho sakta
+        // hai — us case mein service.price pe fallback hota hai (below).
+        price: appointments.price,
         status: appointments.status,
         bundleStatus: appointments.bundleStatus,
         parentId: appointments.parentId,

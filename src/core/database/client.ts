@@ -16,8 +16,14 @@ export function getPool(): Pool {
     })
 
     pool.on('error', (err) => {
-      console.error('Unexpected error on idle DB client', err)
-      process.exit(-1)
+      // Neon (serverless Postgres) idle connections ko background mein close
+      // kar deta hai — ye normal hai, koi fatal cheez nahi. Pehle yahan
+      // process.exit(-1) tha jo har idle-timeout pe POORA server crash kar
+      // deta tha (ETIMEDOUT / connection terminated jaisi cheezein bhi isi
+      // 'error' event se aati hain). `pg` Pool khud hi us bure client ko
+      // pool se remove kar deta hai — hume sirf log karna hai, process
+      // maarne ki zarurat nahi.
+      console.error('DB pool: idle client error (recovered, pool continues)', err.message)
     })
   }
   return pool

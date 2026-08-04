@@ -1,19 +1,17 @@
-import type { FastifyInstance } from 'fastify'
 import { getDb } from '@/core/database/client'
-import { UserRepository } from '../repositories/user.repository'
-import { UserService } from '../services/user.service'
-import { UserController } from '../controllers/user.controller'
 import { PushNotificationService } from '@/core/services/push-notification.service'
-import { ServiceRepository } from '@/modules/consultation/repositories/service.repository'
 import { authenticate } from '@/modules/auth'
+import type { FastifyInstance } from 'fastify'
+import { UserController } from '../controllers/user.controller'
+import { UserRepository } from '../repositories/user.repository'
 import { INTEREST_OPTIONS } from '../schemas/user.schema'
+import { UserService } from '../services/user.service'
 
 export async function userRoutes(app: FastifyInstance) {
   // Dependency injection
   const db = getDb()
   const userRepository = new UserRepository(db)
-  const serviceRepository = new ServiceRepository(db)
-  const userService = new UserService(userRepository, serviceRepository)
+  const userService = new UserService(userRepository)
   const pushNotificationService = new PushNotificationService(db)
   const userController = new UserController(userService, pushNotificationService)
 
@@ -174,44 +172,72 @@ export async function userRoutes(app: FastifyInstance) {
     userController.updateProfile
   )
 
-  // POST /users/upgrade-to-astrologer
+  // POST /users/request-astrologer-upgrade
   app.post(
-    `${prefix}/upgrade-to-astrologer`,
+    `${prefix}/request-astrologer-upgrade`,
     {
       preHandler: [authenticate],
       schema: {
         tags: ['Users'],
-        summary: 'Upgrade current user to astrologer role',
+        summary: 'Submit an application to become an astrologer (pending admin review)',
+        security: [{ bearerAuth: [] }],
+        body: {
+          type: 'object',
+          required: [
+            'bio',
+            'experience',
+            'languages',
+            'specializations',
+            'videoUrl',
+            'document1Url',
+            'document2Url',
+          ],
+          properties: {
+            bio: { type: 'string', minLength: 20, maxLength: 1000 },
+            experience: { type: 'integer', minimum: 0, maximum: 70 },
+            languages: { type: 'array', items: { type: 'string' }, minItems: 1 },
+            specializations: { type: 'array', items: { type: 'string' }, minItems: 1 },
+            videoUrl: { type: 'string' },
+            document1Url: { type: 'string' },
+            document2Url: { type: 'string' },
+          },
+        },
+        response: {
+          200: {
+            type: 'object',
+            properties: { message: { type: 'string' } },
+          },
+        },
+      },
+    },
+    userController.requestAstrologerUpgrade,
+  )
+
+  // GET /users/me/astrologer-application
+  app.get(
+    `${prefix}/me/astrologer-application`,
+    {
+      preHandler: [authenticate],
+      schema: {
+        tags: ['Users'],
+        summary: 'Get current astrologer application status',
         security: [{ bearerAuth: [] }],
         response: {
           200: {
             type: 'object',
             properties: {
-              message: { type: 'string' },
-              user: {
-                type: 'object',
-                properties: {
-                  id: { type: 'string' },
-                  email: { type: ['string', 'null'] },
-                  phone: { type: ['string', 'null'] },
-                  name: { type: 'string' },
-                  dateOfBirth: { type: ['string', 'null'] },
-                  role: { type: 'string' },
-                  interests: { type: ['array', 'null'], items: { type: 'string' } },
-                  isOnboarded: { type: 'boolean' },
-                  isAstrologer: { type: 'boolean' },
-                  avatarUrl: { type: ['string', 'null'] },
-                  bio: { type: ['string', 'null'] },
-                  createdAt: { type: 'string' },
-                  updatedAt: { type: 'string' },
-                },
+              hasApplied: { type: 'boolean' },
+              verificationStatus: {
+                type: ['string', 'null'],
+                enum: ['pending', 'approved', 'rejected', null],
               },
+              rejectionReason: { type: ['string', 'null'] },
             },
           },
         },
       },
     },
-    userController.upgradeToAstrologer
+    userController.getAstrologerApplicationStatus,
   )
 
   // GET /users/interests (utility endpoint to get available interests)

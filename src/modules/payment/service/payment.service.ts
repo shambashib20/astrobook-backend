@@ -45,7 +45,9 @@ export class PaymentService {
       await this.appointmentRepository.findByIdWithDetails(appointmentId)
     if (!appointmentWithDetails) throw NotFoundError('Appointment details not found')
 
-    const amount = Number(appointmentWithDetails.service.price)
+    // Booking waqt ka price snapshot use karo (variant-based) — agar kisi
+    // wajah se null hai (purani appointment) toh service.price pe fallback
+    const amount = Number(appointmentWithDetails.price ?? appointmentWithDetails.service.price)
     if (!amount || amount <= 0) throw BadRequestError('Invalid service price')
 
     // Create Razorpay order

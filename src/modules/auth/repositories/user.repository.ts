@@ -1,6 +1,6 @@
-import { eq, and, gt, lt, count, sql } from 'drizzle-orm'
 import type { Database } from '@/core/database/client'
-import { users, otpVerifications } from '@/core/database/schema'
+import { otpVerifications, users } from '@/core/database/schema'
+import { and, count, eq, gt, lt, sql } from 'drizzle-orm'
 
 export class UserRepository {
   constructor(private readonly db: Database) {}

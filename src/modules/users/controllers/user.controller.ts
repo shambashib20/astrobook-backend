@@ -1,7 +1,12 @@
-import type { FastifyRequest, FastifyReply } from 'fastify'
-import type { UserService } from '../services/user.service'
 import type { PushNotificationService } from '@/core/services/push-notification.service'
-import { OnboardingSchema, UpdateProfileSchema, RegisterPushTokenSchema } from '../schemas/user.schema'
+import type { FastifyReply, FastifyRequest } from 'fastify'
+import {
+  OnboardingSchema,
+  RegisterPushTokenSchema,
+  RequestAstrologerUpgradeSchema,
+  UpdateProfileSchema,
+} from '../schemas/user.schema'
+import type { UserService } from '../services/user.service'
 
 export class UserController {
   constructor(
@@ -58,16 +63,30 @@ export class UserController {
   }
 
   /**
-   * POST /users/upgrade-to-astrologer
-   * Upgrade user to astrologer role
+   * GET /users/me/astrologer-application
+   * Current application status — app isse decide karta hai ki
+   * "Upgrade to Astrologer" button dikhana hai, "Under review" dikhana
+   * hai, ya rejection reason ke saath dobara try karne dena hai.
    */
-  upgradeToAstrologer = async (request: FastifyRequest, reply: FastifyReply) => {
+  getAstrologerApplicationStatus = async (request: FastifyRequest, reply: FastifyReply) => {
     const user = request.user as { userId: string }
-    const updatedUser = await this.userService.upgradeToAstrologer(user.userId)
+    const status = await this.userService.getAstrologerApplicationStatus(user.userId)
+    return reply.status(200).send(status)
+  }
+
+  /**
+   * POST /users/request-astrologer-upgrade
+   * Astrologer banne ki application submit karo — role yahan se turant
+   * NAHI badalta, admin approve karega tabhi.
+   */
+  requestAstrologerUpgrade = async (request: FastifyRequest, reply: FastifyReply) => {
+    const user = request.user as { userId: string }
+    const dto = RequestAstrologerUpgradeSchema.parse(request.body)
+
+    await this.userService.requestAstrologerUpgrade(user.userId, dto)
 
     return reply.status(200).send({
-      message: 'Successfully upgraded to astrologer',
-      user: updatedUser,
+      message: 'Application submitted. Our team will review it soon.',
     })
   }
 }

@@ -38,26 +38,62 @@ export class CartService {
     if (userId === dto.astrologerId) {
       throw BadRequestError('You cannot add your own service to cart')
     }
+
+    // Variant validate karo — na diya ho toh service ka default (30-min) variant
+    let variantId = dto.variantId
+    if (variantId) {
+      const variant = await this.serviceRepository.findVariantById(variantId)
+      if (!variant || variant.serviceId !== dto.serviceId) {
+        throw BadRequestError('Variant does not belong to the specified service')
+      }
+    } else {
+      const defaultVariant = await this.serviceRepository.findDefaultVariant(dto.serviceId)
+      variantId = defaultVariant?.id
+    }
+
     return this.cartRepository.create({
       userId,
       astrologerId: dto.astrologerId,
       serviceId: dto.serviceId,
+      variantId: variantId ?? null,
       scheduledAt: null,
     })
   }
 
   // Cart list ke saath service details (title, price, duration, coverImage,
-  // isBasic) enrich karke bhejte hain — frontend ko alag se fetch na karna pade
+  // isBasic) enrich karke bhejte hain — frontend ko alag se fetch na karna
+  // pade. Variant select hui ho toh uska duration/price service ke defaults
+  // ko override kar deta hai (jo variant chuna wahi dikhna/charge hona chahiye).
   async getMyCart(userId: string) {
     const items = await this.cartRepository.findMine(userId)
     const serviceIds = Array.from(new Set(items.map((i) => i.serviceId)))
-    const services = await this.serviceRepository.findByIds(serviceIds)
+    const variantIds = Array.from(
+      new Set(items.map((i) => i.variantId).filter((id): id is string => !!id)),
+    )
+    const [services, variants] = await Promise.all([
+      this.serviceRepository.findByIds(serviceIds),
+      this.serviceRepository.findVariantsByIds(variantIds),
+    ])
     const serviceMap = new Map(services.map((s) => [s.id, s]))
+    const variantMap = new Map(variants.map((v) => [v.id, v]))
 
-    return items.map((item) => ({
-      ...item,
-      service: serviceMap.get(item.serviceId) ?? null,
-    }))
+    return items.map((item) => {
+      const service = serviceMap.get(item.serviceId) ?? null
+      const variant = item.variantId ? (variantMap.get(item.variantId) ?? null) : null
+      return {
+        ...item,
+        service: service
+          ? {
+              ...service,
+              // Variant ke duration/price override karte hain — cart card
+              // pe wahi dikhna chahiye jo user ne select kiya tha
+              durationMinutes: variant?.durationMinutes ?? service.durationMinutes,
+              price: variant?.price ?? service.price,
+            }
+          : null,
+        variant,
+      }
+    })
   }
 
   async setSlot(id: string, userId: string, scheduledAt: string) {
@@ -98,6 +134,7 @@ export class CartService {
     const serviceMap = new Map(services.map((s) => [s.id, s]))
 
     // Har item ke liye pending appointment banao (existing validation reuse)
+    // — variantId pass karte hain taaki sahi duration/price se booking bane.
     const appointments = []
     for (const item of items) {
       const service = serviceMap.get(item.serviceId)
@@ -105,9 +142,11 @@ export class CartService {
       const appointment = await this.bookingService.initiateBooking(userId, {
         astrologerId: item.astrologerId,
         serviceId: item.serviceId,
+        variantId: item.variantId ?? undefined,
         scheduledAt: item.scheduledAt!.toISOString(),
       })
-      appointments.push({ appointment, price: Number(service.price) || 0 })
+      // appointment.price variant se snapshot ho chuka hai initiateBooking mein
+      appointments.push({ appointment, price: Number(appointment.price) || 0 })
     }
 
     const totalAmount = appointments.reduce((sum, a) => sum + a.price, 0)

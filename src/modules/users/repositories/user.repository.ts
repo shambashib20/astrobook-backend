@@ -1,16 +1,11 @@
-import { eq, sql } from 'drizzle-orm'
 import type { Database } from '@/core/database/client'
-import { users, consultationServices } from '@/core/database/schema'
-import type { OnboardingDto, UpdateProfileDto } from '../schemas/user.schema'
-
-const BASIC_SERVICE_DEFAULTS = {
-  title: 'Basic Consultation',
-  shortDescription: 'A quick starter consultation to get to know your concerns.',
-  about:
-    'This is your Basic consultation slot — a short session to discuss your questions and provide initial guidance. You can update the price and duration anytime from your dashboard.',
-  durationMinutes: 30,
-  price: '199',
-} as const
+import { astrologerProfiles, users } from '@/core/database/schema'
+import { eq, sql } from 'drizzle-orm'
+import type {
+  OnboardingDto,
+  RequestAstrologerUpgradeDto,
+  UpdateProfileDto,
+} from '../schemas/user.schema'
 
 export class UserRepository {
   constructor(private readonly db: Database) {}
@@ -50,34 +45,52 @@ export class UserRepository {
     return user ?? null
   }
 
-  // User ko astrologer bananе ke saath, platform automatically ek Basic
-  // consultancy bhi bana deta hai (koi image nahi, fixed starter price ₹199 /
-  // 30 min) — astrologer baad mein price/duration edit kar sakta hai apne
-  // dashboard se. Dono operations ek hi transaction mein — dono ho ya kuch na ho.
-  async upgradeToAstrologer(userId: string) {
-    return this.db.transaction(async (tx) => {
-      const [user] = await tx
-        .update(users)
-        .set({ isAstrologer: true, role: 'astrologer', updatedAt: sql`now()` })
-        .where(eq(users.id, userId))
-        .returning()
+  // ── Astrologer application (verification flow) ─────────────────────────────
+  // Yahan role/isAstrologer FLIP NAHI hota — sirf ek pending application
+  // (astrologerProfiles row) banti/update hoti hai. Actual role change sirf
+  // admin approve karne pe hota hai (see admin module's updateVerification).
 
-      if (!user) return null
+  async findAstrologerApplication(userId: string) {
+    const [profile] = await this.db
+      .select()
+      .from(astrologerProfiles)
+      .where(eq(astrologerProfiles.userId, userId))
+      .limit(1)
+    return profile ?? null
+  }
 
-      await tx.insert(consultationServices).values({
-        astrologerId: userId,
-        isBasic: true,
-        title: BASIC_SERVICE_DEFAULTS.title,
-        shortDescription: BASIC_SERVICE_DEFAULTS.shortDescription,
-        coverImage: null,
-        about: BASIC_SERVICE_DEFAULTS.about,
-        durationMinutes: BASIC_SERVICE_DEFAULTS.durationMinutes,
-        price: BASIC_SERVICE_DEFAULTS.price,
-        tags: [],
-        isActive: true,
+  async submitAstrologerApplication(userId: string, dto: RequestAstrologerUpgradeDto) {
+    const [profile] = await this.db
+      .insert(astrologerProfiles)
+      .values({
+        userId,
+        bio: dto.bio,
+        experience: dto.experience,
+        languages: dto.languages,
+        specializations: dto.specializations,
+        videoUrl: dto.videoUrl,
+        document1Url: dto.document1Url,
+        document2Url: dto.document2Url,
+        verificationStatus: 'pending',
       })
-
-      return user
-    })
+      .onConflictDoUpdate({
+        target: astrologerProfiles.userId,
+        set: {
+          bio: dto.bio,
+          experience: dto.experience,
+          languages: dto.languages,
+          specializations: dto.specializations,
+          videoUrl: dto.videoUrl,
+          document1Url: dto.document1Url,
+          document2Url: dto.document2Url,
+          verificationStatus: 'pending',
+          rejectionReason: null,
+          verifiedAt: null,
+          verifiedBy: null,
+          updatedAt: sql`now()`,
+        },
+      })
+      .returning()
+    return profile ?? null
   }
 }

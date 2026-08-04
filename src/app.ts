@@ -1,13 +1,14 @@
-import Fastify from 'fastify'
 import { env } from '@/config/env'
 import { registerPlugins } from '@/core/plugins'
 import { authRoutes } from '@/modules/auth'
-import { userRoutes } from '@/modules/users'
 import { consultationRoutes } from '@/modules/consultation'
+import { userRoutes } from '@/modules/users'
+import Fastify from 'fastify'
+import { adminRoutes } from './modules/admin'
 import { astrologerRoutes } from './modules/astrologers/routes/astrologer.routes'
+import { cartRoutes } from './modules/cart/routes/cart.routes'
 import { categoriesRoutes } from './modules/categories/routes/categories.routes'
 import { paymentRoutes } from './modules/payment/routes/payment.routes'
-import { cartRoutes } from './modules/cart/routes/cart.routes'
 import { postsRoutes } from './modules/posts'
 
 export async function buildApp() {
@@ -73,5 +74,6 @@ export async function buildApp() {
   await app.register(astrologerRoutes, { prefix: apiPrefix })
   await app.register(postsRoutes, { prefix: apiPrefix })
   await app.register(categoriesRoutes, { prefix: apiPrefix })
+  await app.register(adminRoutes, { prefix: apiPrefix })
   return app
 }

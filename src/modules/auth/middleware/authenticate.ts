@@ -1,5 +1,5 @@
-import type { FastifyRequest, FastifyReply } from 'fastify'
-import { UnauthorizedError, ForbiddenError } from '@/core/errors'
+import { ForbiddenError, UnauthorizedError } from '@/core/errors'
+import type { FastifyReply, FastifyRequest } from 'fastify'
 
 /**
  * Middleware to verify JWT access token.

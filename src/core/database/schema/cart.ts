@@ -1,6 +1,6 @@
 import { pgTable, uuid, timestamp } from 'drizzle-orm/pg-core'
 import { users } from './users'
-import { consultationServices } from './consultation'
+import { consultationServices, consultationServiceVariants } from './consultation'
 
 // ─── Cart Items ─────────────────────────────────────────────────────────────
 // Ek user ke cart mein multiple alag services/astrologers ho sakte hain.
@@ -18,6 +18,11 @@ export const cartItems = pgTable('cart_items', {
   serviceId: uuid('service_id')
     .notNull()
     .references(() => consultationServices.id, { onDelete: 'cascade' }),
+  // Kaunsa duration/price variant select kiya tha (nullable — purane cart
+  // items ke liye, aur legacy support ke liye jab variant delete ho jaye)
+  variantId: uuid('variant_id').references(() => consultationServiceVariants.id, {
+    onDelete: 'set null',
+  }),
   // Slot cart mein hi baad mein set hota hai (ek dedicated slot-picker screen se)
   scheduledAt: timestamp('scheduled_at', { withTimezone: true }),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),

@@ -19,9 +19,15 @@ export class PostsRepository {
   // ── Stats-enriched select helper ────────────────────────────────────────
   // likesCount, commentsCount, aur (agar viewerId diya ho) isLikedByMe —
   // correlated subqueries se, ek hi query mein (feed page-size par N+1 nahi banta)
+  //
+  // astrologerName/astrologerAvatar bhi yahin se aate hain (users table join
+  // karke) — pehle yeh join nahi tha, isliye feed pe hamesha "Astrologer" +
+  // emoji fallback hi dikhta tha, kabhi asli naam/photo nahi.
   private statsSelect(viewerId?: string) {
     return {
       ...getTableColumns(posts),
+      astrologerName: users.name,
+      astrologerAvatar: users.avatarUrl,
       likesCount: sql<number>`(SELECT COUNT(*)::int FROM ${postLikes} WHERE ${postLikes.postId} = ${posts.id})`,
       commentsCount: sql<number>`(SELECT COUNT(*)::int FROM ${postComments} WHERE ${postComments.postId} = ${posts.id})`,
       isLikedByMe: viewerId
@@ -39,6 +45,7 @@ export class PostsRepository {
     return this.db
       .select(this.statsSelect(viewerId))
       .from(posts)
+      .innerJoin(users, eq(posts.astrologerId, users.id))
       .where(conditions.length > 0 ? and(...conditions) : undefined)
       .orderBy(desc(posts.createdAt))
       .limit(limit)
@@ -59,6 +66,7 @@ export class PostsRepository {
     const [post] = await this.db
       .select(this.statsSelect(viewerId))
       .from(posts)
+      .innerJoin(users, eq(posts.astrologerId, users.id))
       .where(eq(posts.id, id))
       .limit(1)
     return post ?? null

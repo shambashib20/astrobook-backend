@@ -8,14 +8,16 @@ import { z } from 'zod'
 // Explore ke categories jaisi hi tags — kam se kam 1, max 5
 export const ServiceTagsSchema = z.array(z.string().min(1)).min(1).max(5)
 
-// Naya "normal" service banate waqt (astrologer khud) — cover image zaroori
+// Naya "normal" service banate waqt (astrologer khud) — cover image zaroori.
+// Duration/price ab is level pe nahi liya jaata — service create hote hi
+// 5 fixed duration variants (10/30/45/60/90 min) auto-create ho jaate hain
+// default prices ke saath; astrologer baad mein har variant ka price alag
+// se edit kar sakta hai (UpdateServiceVariantSchema se).
 export const CreateServiceSchema = z.object({
   title: z.string().min(3).max(255),
   shortDescription: z.string().min(10).max(500),
   coverImage: z.string().url('Cover image must be a valid URL'),
   about: z.string().min(20),
-  durationMinutes: z.number().int().min(15).max(180),
-  price: z.number().positive().optional(),
   tags: ServiceTagsSchema,
 })
 
@@ -24,6 +26,14 @@ export const UpdateServiceSchema = CreateServiceSchema.partial()
 
 // Backward-compat alias (purane imports ke liye)
 export const UpsertServiceSchema = CreateServiceSchema
+
+// ─── Service Variant ───────────────────────────────────────────────────────
+// Har service ke 5 fixed duration variants hote hain — sirf price editable
+// hai, duration fixed rehta hai (isliye schema mein duration nahi hai).
+
+export const UpdateServiceVariantSchema = z.object({
+  price: z.number().positive(),
+})
 
 // ─── Availability Window ──────────────────────────────────────────────────────
 
@@ -58,6 +68,9 @@ export const CreateAvailabilitySchema = z
 export const GetSlotsQuerySchema = z.object({
   astrologerId: z.string().uuid(),
   serviceId: z.string().uuid(),
+  // Konsa duration variant — slot length isi se decide hoti hai. Optional
+  // (backward-compat), default (30-min) variant use ho jaata hai agar diya na ho.
+  variantId: z.string().uuid().optional(),
   date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Date must be YYYY-MM-DD'),
 })
 
@@ -73,6 +86,10 @@ export const BrowseServicesQuerySchema = z.object({
 export const CreateBookingSchema = z.object({
   astrologerId: z.string().uuid(),
   serviceId: z.string().uuid(),
+  // Kaunsa duration/price variant (10/30/45/60/90 min) book karna hai —
+  // optional rakha hai backward-compat ke liye, par booking flow ab hamesha
+  // ise bhejta hai (frontend pe default 30-min pre-selected rehta hai).
+  variantId: z.string().uuid().optional(),
   scheduledAt: z.string().datetime({ message: 'Must be a valid ISO datetime', offset: true }),
   notes: z.string().max(500).optional(),
 })
@@ -138,6 +155,7 @@ export const PAYMENT_STATUS = ['pending', 'success', 'failed'] as const
 export type CreateServiceDto = z.infer<typeof CreateServiceSchema>
 export type UpsertServiceDto = z.infer<typeof CreateServiceSchema>
 export type UpdateServiceDto = z.infer<typeof UpdateServiceSchema>
+export type UpdateServiceVariantDto = z.infer<typeof UpdateServiceVariantSchema>
 export type CreateAvailabilityDto = z.infer<typeof CreateAvailabilitySchema>
 export type GetSlotsQueryDto = z.infer<typeof GetSlotsQuerySchema>
 export type BrowseServicesQueryDto = z.infer<typeof BrowseServicesQuerySchema>

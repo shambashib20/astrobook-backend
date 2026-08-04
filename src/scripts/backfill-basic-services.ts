@@ -9,9 +9,9 @@
  *   npx tsx src/scripts/backfill-basic-services.ts
  */
 import { getDb } from '@/core/database/client'
-import { users, consultationServices } from '@/core/database/schema'
-import { eq, and } from 'drizzle-orm'
+import { consultationServices, users } from '@/core/database/schema'
 import { ServiceRepository } from '@/modules/consultation/repositories/service.repository'
+import { and, eq } from 'drizzle-orm'
 
 async function main() {
   const db = getDb()

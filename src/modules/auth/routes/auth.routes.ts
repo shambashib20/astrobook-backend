@@ -1,10 +1,10 @@
-import type { FastifyInstance } from 'fastify'
 import { getDb } from '@/core/database/client'
-import { UserRepository } from '../repositories/user.repository'
-import { SessionRepository } from '../repositories/session.repository'
-import { AuthService } from '../services/auth.service'
+import type { FastifyInstance } from 'fastify'
 import { AuthController } from '../controllers/auth.controller'
 import { authenticate } from '../middleware/authenticate'
+import { SessionRepository } from '../repositories/session.repository'
+import { UserRepository } from '../repositories/user.repository'
+import { AuthService } from '../services/auth.service'
 
 export async function authRoutes(app: FastifyInstance) {
   const db = getDb()
@@ -30,6 +30,26 @@ export async function authRoutes(app: FastifyInstance) {
   const authController = new AuthController(authService)
 
   const prefix = '/auth'
+
+  // POST /auth/admin-login — email + password, sirf role='admin' accounts ke liye
+  app.post(
+    `${prefix}/admin-login`,
+    {
+      schema: {
+        tags: ['Auth'],
+        summary: 'Admin login via email + password',
+        body: {
+          type: 'object',
+          required: ['email', 'password'],
+          properties: {
+            email: { type: 'string', format: 'email' },
+            password: { type: 'string' },
+          },
+        },
+      },
+    },
+    authController.adminLogin,
+  )
 
   // POST /auth/send-otp
   app.post(

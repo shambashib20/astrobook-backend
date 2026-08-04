@@ -1,17 +1,17 @@
-import bcrypt from 'bcrypt'
 import crypto from 'crypto'
-import axios from 'axios'
-import { OAuth2Client } from 'google-auth-library'
 import { env } from '@/config/env'
 import {
-  UnauthorizedError,
-  InvalidTokenError,
-  TokenExpiredError,
   BadRequestError,
+  InvalidTokenError,
   RateLimitError,
+  TokenExpiredError,
+  UnauthorizedError,
 } from '@/core/errors'
-import type { UserRepository } from '../repositories/user.repository'
+import axios from 'axios'
+import bcrypt from 'bcrypt'
+import { OAuth2Client } from 'google-auth-library'
 import type { SessionRepository } from '../repositories/session.repository'
+import type { UserRepository } from '../repositories/user.repository'
 import type { AuthResponse } from '../schemas/auth.schema'
 
 interface JWTService {
@@ -101,6 +101,32 @@ export class AuthService {
       refreshToken,
       user: this._formatUser(user),
       isNewUser,
+    }
+  }
+
+  // ── Admin Login (email + password) ───────────────────────────────────────────
+
+  async adminLogin(email: string, password: string): Promise<AuthResponse> {
+    const user = await this.userRepository.findByEmail(email)
+
+    if (!user || user.role !== 'admin' || !user.passwordHash) {
+      // Same generic message chahe user na mile ya password na ho — taaki
+      // koi email enumerate na kar sake
+      throw UnauthorizedError('Invalid email or password')
+    }
+
+    const isMatch = await bcrypt.compare(password, user.passwordHash)
+    if (!isMatch) {
+      throw UnauthorizedError('Invalid email or password')
+    }
+
+    const { accessToken, refreshToken } = await this._createTokens(user)
+
+    return {
+      accessToken,
+      refreshToken,
+      user: this._formatUser(user),
+      isNewUser: false,
     }
   }
 

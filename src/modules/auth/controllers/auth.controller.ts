@@ -1,10 +1,17 @@
-import type { FastifyRequest, FastifyReply } from 'fastify'
-import type { AuthService } from '../services/auth.service'
-import { SendOtpSchema, VerifyOtpSchema, RefreshTokenSchema, LogoutSchema, GoogleLoginSchema } from '../schemas/auth.schema'
 import { env } from '@/config/env'
+import type { FastifyReply, FastifyRequest } from 'fastify'
+import { AdminLoginSchema, GoogleLoginSchema, LogoutSchema, RefreshTokenSchema, SendOtpSchema, VerifyOtpSchema } from '../schemas/auth.schema'
+import type { AuthService } from '../services/auth.service'
 
 export class AuthController {
   constructor(private readonly authService: AuthService) {}
+
+  // POST /auth/admin-login
+  adminLogin = async (request: FastifyRequest, reply: FastifyReply) => {
+    const { email, password } = AdminLoginSchema.parse(request.body)
+    const result = await this.authService.adminLogin(email, password)
+    return reply.status(200).send({ success: true, data: result })
+  }
 
   // POST /auth/send-otp
   sendOtp = async (request: FastifyRequest, reply: FastifyReply) => {

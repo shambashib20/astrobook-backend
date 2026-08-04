@@ -88,6 +88,21 @@ export async function consultationRoutes(app: FastifyInstance) {
     astroController.deactivateService,
   )
 
+  // Ek variant ka price edit — astrologer khud ki service ke liye hi
+  app.patch(
+    '/consultation/services/:serviceId/variants/:variantId',
+    {
+      preHandler: [authenticate, requireRole(['astrologer', 'admin'])],
+      schema: {
+        params: {
+          type: 'object',
+          properties: { serviceId: { type: 'string' }, variantId: { type: 'string' } },
+        },
+      },
+    },
+    astroController.updateServiceVariant,
+  )
+
   // Availability
   app.post(
     '/consultation/availability',
@@ -135,6 +150,17 @@ export async function consultationRoutes(app: FastifyInstance) {
       },
     },
     userController.getAstrologerServices,
+  )
+
+  // Ek service ke 5 duration variants — user detail page variant-selector
+  app.get(
+    '/consultation/services/:id/variants',
+    {
+      schema: {
+        params: { type: 'object', properties: { id: { type: 'string' } } },
+      },
+    },
+    userController.getServiceVariants,
   )
 
   // Astrologer ke available dates

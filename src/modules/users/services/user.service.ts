@@ -1,13 +1,13 @@
-import { NotFoundError, BadRequestError } from '@/core/errors'
+import { BadRequestError, NotFoundError } from '@/core/errors'
 import type { UserRepository } from '../repositories/user.repository'
-import type { ServiceRepository } from '@/modules/consultation/repositories/service.repository'
-import type { OnboardingDto, UpdateProfileDto } from '../schemas/user.schema'
+import type {
+  OnboardingDto,
+  RequestAstrologerUpgradeDto,
+  UpdateProfileDto,
+} from '../schemas/user.schema'
 
 export class UserService {
-  constructor(
-    private readonly userRepository: UserRepository,
-    private readonly serviceRepository: ServiceRepository,
-  ) {}
+  constructor(private readonly userRepository: UserRepository) {}
 
   async onboardUser(userId: string, dto: OnboardingDto) {
     const user = await this.userRepository.findById(userId)
@@ -43,26 +43,41 @@ export class UserService {
     return this.userRepository.updateProfile(userId, dto)
   }
 
-  async upgradeToAstrologer(userId: string) {
-    const user = await this.userRepository.findById(userId)
+  // ── Astrologer application ──────────────────────────────────────────────────
+  // Submit karne se role FLIP nahi hota — sirf ek 'pending' application
+  // jaati hai. Admin approve karega tabhi astrologer banega (admin module).
 
-    if (!user) {
-      throw NotFoundError('User not found')
+  async getAstrologerApplicationStatus(userId: string) {
+    const user = await this.userRepository.findById(userId)
+    if (!user) throw NotFoundError('User not found')
+
+    const application = await this.userRepository.findAstrologerApplication(userId)
+
+    return {
+      hasApplied: !!application,
+      verificationStatus: application?.verificationStatus ?? null,
+      rejectionReason: application?.rejectionReason ?? null,
     }
+  }
+
+  async requestAstrologerUpgrade(userId: string, dto: RequestAstrologerUpgradeDto) {
+    const user = await this.userRepository.findById(userId)
+    if (!user) throw NotFoundError('User not found')
 
     if (user.isAstrologer) {
-      throw BadRequestError('User is already an astrologer')
+      throw BadRequestError('You are already an astrologer')
     }
 
-    const upgraded = await this.userRepository.upgradeToAstrologer(userId)
+    const existing = await this.userRepository.findAstrologerApplication(userId)
+    if (existing?.verificationStatus === 'pending') {
+      throw BadRequestError('Your application is already under review')
+    }
+    if (existing?.verificationStatus === 'approved') {
+      throw BadRequestError('Your application is already approved')
+    }
+    // 'rejected' ya koi application nahi — dono cases mein resubmit allowed
+    // (onConflictDoUpdate resets status back to 'pending')
 
-    // Platform har naye astrologer ke liye ek default "Basic Consultation"
-    // service auto-create karta hai (isBasic: true). Astrologer isko baad
-    // mein price/duration edit kar sakta hai, but yeh delete nahi hoti aur
-    // profile ke normal consultations list mein show nahi hoti — uski jagah
-    // profile ke top pe "Book Now" CTA banti hai.
-    await this.serviceRepository.createBasic(userId)
-
-    return upgraded
+    return this.userRepository.submitAstrologerApplication(userId, dto)
   }
 }

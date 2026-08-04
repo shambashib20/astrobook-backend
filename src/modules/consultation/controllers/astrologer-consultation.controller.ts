@@ -4,6 +4,7 @@ import type { BookingService } from '../services/booking.service'
 import {
   CreateServiceSchema,
   UpdateServiceSchema,
+  UpdateServiceVariantSchema,
   CreateAvailabilitySchema,
   GetSlotsQuerySchema,
   BrowseServicesQuerySchema,
@@ -45,6 +46,21 @@ export class AstrologerConsultationController {
     const { id } = request.params as { id: string }
     await this.consultationService.deactivateService(id, astrologerId)
     return reply.status(200).send({ success: true })
+  }
+
+  // PATCH /consultation/services/:serviceId/variants/:variantId — astrologer
+  // sirf ek variant ka price edit karta hai (duration fixed hai)
+  updateServiceVariant = async (request: FastifyRequest, reply: FastifyReply) => {
+    const { userId: astrologerId } = request.user as { userId: string }
+    const { serviceId, variantId } = request.params as { serviceId: string; variantId: string }
+    const { price } = UpdateServiceVariantSchema.parse(request.body)
+    const variant = await this.consultationService.updateServiceVariant(
+      serviceId,
+      variantId,
+      astrologerId,
+      price,
+    )
+    return reply.status(200).send({ success: true, data: { variant } })
   }
 
   // POST /consultation/availability
@@ -92,11 +108,24 @@ export class UserConsultationController {
     return reply.status(200).send({ success: true, data: { services } })
   }
 
-  // GET /consultation/slots?astrologerId=X&serviceId=Y&date=YYYY-MM-DD
+  // GET /consultation/slots?astrologerId=X&serviceId=Y&variantId=Z&date=YYYY-MM-DD
   getSlots = async (request: FastifyRequest, reply: FastifyReply) => {
-    const { astrologerId, serviceId, date } = GetSlotsQuerySchema.parse(request.query)
-    const slots = await this.consultationService.getAvailableSlots(astrologerId, serviceId, date)
+    const { astrologerId, serviceId, variantId, date } = GetSlotsQuerySchema.parse(request.query)
+    const slots = await this.consultationService.getAvailableSlots(
+      astrologerId,
+      serviceId,
+      date,
+      variantId,
+    )
     return reply.status(200).send({ success: true, data: { slots } })
+  }
+
+  // GET /consultation/services/:id/variants — service ke 5 duration variants
+  // (user detail page ka variant-selector isi se aata hai)
+  getServiceVariants = async (request: FastifyRequest, reply: FastifyReply) => {
+    const { id: serviceId } = request.params as { id: string }
+    const variants = await this.consultationService.getServiceVariants(serviceId)
+    return reply.status(200).send({ success: true, data: { variants } })
   }
 
   // GET /consultation/astrologers/:id/available-dates

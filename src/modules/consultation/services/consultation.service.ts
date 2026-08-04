@@ -71,13 +71,83 @@ export class ConsultationService {
     return this.serviceRepository.update(serviceId, astrologerId, dto)
   }
 
+  // Astrologer ki apni services (Basic + normal) — har service ke saath
+  // uske 5 duration variants bhi attach karke bhejta hai (services.tsx
+  // composer/edit UI ko variant price editors ke liye chahiye).
   async getMyServices(astrologerId: string) {
-    return this.serviceRepository.findByAstrologer(astrologerId)
+    const services = await this.serviceRepository.findByAstrologer(astrologerId)
+    return this.attachVariants(services)
   }
 
   // Explore category detail page — kisi bhi astrologer ki us tag wali services
   async browseServicesByTag(tag: string, limit: number, offset: number) {
     return this.serviceRepository.findByTag(tag, limit, offset)
+  }
+
+  // ── Variants ──────────────────────────────────────────────────────────────
+
+  // Ek service ke saare 5 duration variants — user detail page (variant
+  // selector) aur astrologer edit modal, dono yahi endpoint use karte hain.
+  async getServiceVariants(serviceId: string) {
+    const service = await this.serviceRepository.findById(serviceId)
+    if (!service) throw NotFoundError('Service not found')
+    return this.serviceRepository.findVariantsByService(serviceId)
+  }
+
+  // Astrologer sirf price edit kar sakta hai (duration fixed hai, isliye
+  // schema level pe hi duration accept nahi hota).
+  async updateServiceVariant(
+    serviceId: string,
+    variantId: string,
+    astrologerId: string,
+    price: number,
+  ) {
+    const service = await this.serviceRepository.findById(serviceId)
+    if (!service) throw NotFoundError('Service not found')
+    if (service.astrologerId !== astrologerId) throw ForbiddenError('Not your service')
+
+    const variant = await this.serviceRepository.findVariantById(variantId)
+    if (!variant || variant.serviceId !== serviceId) {
+      throw NotFoundError('Variant not found for this service')
+    }
+
+    const updated = await this.serviceRepository.updateVariantPrice(variantId, price)
+
+    // 30-min (default) variant ka price service-level mirror column mein
+    // bhi sync karo — purani browse/cart-card listing bina tootey chalti rahe
+    if (variant.isDefault) {
+      await this.serviceRepository.syncServiceMirrorPrice(serviceId, String(price))
+    }
+
+    return updated
+  }
+
+  // Booking/cart flow ke liye — variant fetch + ownership/active validation
+  async getVariantForBooking(serviceId: string, variantId: string, astrologerId: string) {
+    const service = await this.getServiceForBooking(serviceId, astrologerId)
+    const variant = await this.serviceRepository.findVariantById(variantId)
+    if (!variant || variant.serviceId !== service.id) {
+      throw BadRequestError('Variant does not belong to the specified service')
+    }
+    return variant
+  }
+
+  async getDefaultVariant(serviceId: string) {
+    const variant = await this.serviceRepository.findDefaultVariant(serviceId)
+    if (!variant) throw NotFoundError('Default variant not found for this service')
+    return variant
+  }
+
+  // Helper — services list ke saath unke variants attach karo (N+1 avoid
+  // karne ke liye ek hi query se saare variants fetch karke group karte hain)
+  private async attachVariants<T extends { id: string }>(
+    services: T[],
+  ): Promise<(T & { variants: Awaited<ReturnType<ServiceRepository['findVariantsByService']>> })[]> {
+    if (services.length === 0) return []
+    const allVariants = await Promise.all(
+      services.map((s) => this.serviceRepository.findVariantsByService(s.id)),
+    )
+    return services.map((service, i) => ({ ...service, variants: allVariants[i]! }))
   }
 
   async deactivateService(serviceId: string, astrologerId: string) {
@@ -92,9 +162,12 @@ export class ConsultationService {
     return this.serviceRepository.deactivate(serviceId, astrologerId)
   }
 
-  // User side — astrologer ki services
+  // User side — astrologer ki services (variants ke saath — profile page pe
+  // "Book Now" price bhi default variant se aata hai, aur service-detail
+  // page pe variant selector dikhta hai)
   async getAstrologerServices(astrologerId: string) {
-    return this.serviceRepository.findByAstrologer(astrologerId)
+    const services = await this.serviceRepository.findByAstrologer(astrologerId)
+    return this.attachVariants(services)
   }
 
   async getServiceForBooking(serviceId: string, astrologerId: string) {
@@ -154,17 +227,26 @@ export class ConsultationService {
     astrologerId: string,
     serviceId: string,
     date: string,
+    variantId?: string,
   ): Promise<TimeSlot[]> {
-    // Service fetch karo — duration ke liye
+    // Service fetch karo
     const service = await this.serviceRepository.findById(serviceId)
     if (!service) throw NotFoundError('Service not found')
     if (!service.isActive) throw BadRequestError('Service is not active')
+
+    // Duration variant se aati hai — koi variant na diya ho toh default (30-min)
+    const variant = variantId
+      ? await this.serviceRepository.findVariantById(variantId)
+      : await this.serviceRepository.findDefaultVariant(serviceId)
+    if (!variant || variant.serviceId !== serviceId) {
+      throw BadRequestError('Variant does not belong to the specified service')
+    }
 
     // Us din ke saare availability windows fetch karo
     const windows = await this.availabilityRepository.findAllByDate(astrologerId, date)
     if (windows.length === 0) return [] // Koi availability nahi
 
-    const durationMs = service.durationMinutes * 60 * 1000
+    const durationMs = variant.durationMinutes * 60 * 1000
 
     // Existing bookings — poore din ke liye ek hi baar fetch karo (sabse
     // pehli window ke start se sabse aakhri window ke end tak cover karega)
