@@ -55,6 +55,10 @@ export class AppointmentRepository {
         parentId: appointments.parentId,
         agoraChannel: appointments.agoraChannel,
         agoraToken: appointments.agoraToken,
+        // Astrologer session mein kab live hua — frontend isse decide karta
+        // hai ki user ka "Join" button enable karna hai ya "astrologer ka
+        // wait karo" dikhana hai
+        astrologerJoinedAt: appointments.astrologerJoinedAt,
         notes: appointments.notes,
         createdAt: appointments.createdAt,
         service: {
@@ -163,6 +167,7 @@ export class AppointmentRepository {
       bundleStatus: 'in_progress' | 'paused' | 'completed'
       agoraChannel: string
       agoraToken: string
+      astrologerJoinedAt: Date
     }>,
   ) {
     const [appointment] = await this.db

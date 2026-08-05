@@ -145,15 +145,41 @@ export class BookingService {
     if (appointment.status === 'cancelled') throw BadRequestError('Appointment is cancelled')
     if (appointment.status === 'completed') throw BadRequestError('Session already completed')
 
-    // Join sirf scheduled time se JOIN_GRACE_MINUTES pehle se allow hai —
-    // usse pehle "Session starts in X minutes" dikhna chahiye frontend pe
+    const isAstrologer = requesterId === appointment.astrologerId
     const now = new Date()
-    const joinOpensAt = new Date(appointment.scheduledAt.getTime() - JOIN_GRACE_MINUTES * 60 * 1000)
-    if (now < joinOpensAt) {
-      const minutesLeft = Math.ceil((joinOpensAt.getTime() - now.getTime()) / 60000)
-      throw BadRequestError(
-        `Session abhi shuru nahi hui — ${minutesLeft} minute baad join kar sakte ho`,
+
+    if (isAstrologer) {
+      // Astrologer "green room" ki tarah scheduled time se JOIN_GRACE_MINUTES
+      // pehle akela wait kar sakta hai (session duration pe asar nahi —
+      // endsAt hamesha fixed scheduledAt + duration hai, join-time se nahi
+      // badalta). Isse user ko schedule se pehle real video milne ka bug
+      // nahi hota kyunki user ka gate neeche alag/sakht hai.
+      const joinOpensAt = new Date(
+        appointment.scheduledAt.getTime() - JOIN_GRACE_MINUTES * 60 * 1000,
       )
+      if (now < joinOpensAt) {
+        const minutesLeft = Math.ceil((joinOpensAt.getTime() - now.getTime()) / 60000)
+        throw BadRequestError(
+          `Session abhi shuru nahi hui — ${minutesLeft} minute baad join kar sakte ho`,
+        )
+      }
+    } else {
+      // User ka asli (Agora) join sirf tabhi allowed hai jab (a) scheduled
+      // time aa chuka ho — early join se paid duration se zyada dena
+      // padta tha (5 min grace + poora duration) — aur (b) astrologer
+      // pehle se live ho, warna user akele "call" mein baith ke wait
+      // karega jo galat UX hai.
+      if (now < appointment.scheduledAt) {
+        const minutesLeft = Math.ceil(
+          (appointment.scheduledAt.getTime() - now.getTime()) / 60000,
+        )
+        throw BadRequestError(
+          `Session abhi shuru nahi hua — ${minutesLeft} minute baad shuru hoga`,
+        )
+      }
+      if (!appointment.astrologerJoinedAt) {
+        throw BadRequestError('Astrologer abhi session mein nahi aayi hai — thodi der wait karo')
+      }
     }
 
     // Agora token generate karo
@@ -165,6 +191,7 @@ export class BookingService {
         status: 'ongoing',
         agoraChannel: channel,
         agoraToken: token,
+        ...(isAstrologer ? { astrologerJoinedAt: now } : {}),
       })
 
       // Doosri party ko batao ki session shuru ho chuka hai, wait ho raha hai
@@ -175,6 +202,12 @@ export class BookingService {
         body: 'Doosri party tumhara wait kar rahi hai — session join karo',
         data: { type: 'session_waiting', appointmentId },
       })
+    } else if (isAstrologer && !appointment.astrologerJoinedAt) {
+      // Rare edge case: status pehle se 'ongoing' hai (e.g. astrologer ne
+      // dobara app khola/reconnect kiya) lekin astrologerJoinedAt kisi
+      // wajah se set nahi hua tha — abhi bhi set kar do taaki user ka gate
+      // kabhi hamesha ke liye locked na reh jaaye
+      await this.appointmentRepository.update(appointmentId, { astrologerJoinedAt: now })
     }
 
     return {

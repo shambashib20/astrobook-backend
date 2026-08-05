@@ -173,6 +173,13 @@ export const appointments = pgTable('appointments', {
   // Agora — only populated after payment
   agoraChannel: text('agora_channel'),
   agoraToken: text('agora_token'),
+  // Astrologer session mein sabse pehle kab live hua — ye set hote hi user
+  // ko join karne diya jaata hai. Purpose: astrologer "green room" ki tarah
+  // scheduled time se JOIN_GRACE_MINUTES pehle akela wait kar sakta hai
+  // (session duration pe iska asar nahi padta, kyunki endsAt hamesha fixed
+  // scheduledAt + duration hai) — lekin user ka asli (Agora) join tab tak
+  // block rehta hai jab tak yeh set na ho jaaye.
+  astrologerJoinedAt: timestamp('astrologer_joined_at', { withTimezone: true }),
   // "Session starting soon" push reminder duplicate na bheje isliye —
   // ek baar bhej diya toh yahan timestamp set ho jaata hai
   reminderSentAt: timestamp('reminder_sent_at', { withTimezone: true }),
