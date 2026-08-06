@@ -1,4 +1,4 @@
-import { BadRequestError, ForbiddenError, NotFoundError } from '@/core/errors'
+import { BadRequestError, ConflictError, ForbiddenError, NotFoundError } from '@/core/errors'
 import type { AppointmentRepository } from '../repositories/appointment.repository'
 import type { ConsultationService } from './consultation.service'
 import type { AgoraService } from './agora.service'
@@ -39,8 +39,9 @@ function toUtcTimestamp(dateStr: string, timeStr: string, timezone: string): Dat
 // ─── BookingService ───────────────────────────────────────────────────────────
 
 // Scheduled time se kitne minute pehle join allowed hai
-const JOIN_GRACE_MINUTES = 5
-
+// NOTE: frontend apna khud ka 5-min "countdown dikhana shuru karo" constant
+// rakhta hai UI ke liye — backend ka gate hamesha exact scheduledAt hai,
+// isliye yahan koi grace-minute constant ki zarurat nahi.
 export class BookingService {
   constructor(
     private readonly appointmentRepository: AppointmentRepository,
@@ -148,38 +149,27 @@ export class BookingService {
     const isAstrologer = requesterId === appointment.astrologerId
     const now = new Date()
 
-    if (isAstrologer) {
-      // Astrologer "green room" ki tarah scheduled time se JOIN_GRACE_MINUTES
-      // pehle akela wait kar sakta hai (session duration pe asar nahi —
-      // endsAt hamesha fixed scheduledAt + duration hai, join-time se nahi
-      // badalta). Isse user ko schedule se pehle real video milne ka bug
-      // nahi hota kyunki user ka gate neeche alag/sakht hai.
-      const joinOpensAt = new Date(
-        appointment.scheduledAt.getTime() - JOIN_GRACE_MINUTES * 60 * 1000,
+    // Simplify: dono astrologer aur user ko EXACT same time-gate — koi
+    // early "green room" access nahi (pehle astrologer ko 5 min pehle mil
+    // jaata tha, jo confusing tha — asymmetric aur user ko lagta"kyun mujhe
+    // wait karna pada"). Ab dono ke liye ek hi rule: scheduled time se
+    // pehle koi bhi real join nahi kar sakta.
+    if (now < appointment.scheduledAt) {
+      const minutesLeft = Math.ceil(
+        (appointment.scheduledAt.getTime() - now.getTime()) / 60000,
       )
-      if (now < joinOpensAt) {
-        const minutesLeft = Math.ceil((joinOpensAt.getTime() - now.getTime()) / 60000)
-        throw BadRequestError(
-          `Session abhi shuru nahi hui — ${minutesLeft} minute baad join kar sakte ho`,
-        )
-      }
-    } else {
-      // User ka asli (Agora) join sirf tabhi allowed hai jab (a) scheduled
-      // time aa chuka ho — early join se paid duration se zyada dena
-      // padta tha (5 min grace + poora duration) — aur (b) astrologer
-      // pehle se live ho, warna user akele "call" mein baith ke wait
-      // karega jo galat UX hai.
-      if (now < appointment.scheduledAt) {
-        const minutesLeft = Math.ceil(
-          (appointment.scheduledAt.getTime() - now.getTime()) / 60000,
-        )
-        throw BadRequestError(
-          `Session abhi shuru nahi hua — ${minutesLeft} minute baad shuru hoga`,
-        )
-      }
-      if (!appointment.astrologerJoinedAt) {
-        throw BadRequestError('Astrologer abhi session mein nahi aayi hai — thodi der wait karo')
-      }
+      throw BadRequestError(
+        `Session abhi shuru nahi hua — ${minutesLeft} minute baad shuru hoga`,
+      )
+    }
+
+    // User ko safety ke liye astrologer ka wait karna padta hai (taaki
+    // akele call mein na baithe) — lekin ab ye sirf chand seconds ka gap
+    // hota hai (dono ka gate scheduledAt hi hai), koi 5-min asymmetric
+    // wait nahi. Frontend isko error-alert ki jagah "waiting..." state
+    // ki tarah treat karta hai aur khud-b-khud retry karta hai.
+    if (!isAstrologer && !appointment.astrologerJoinedAt) {
+      throw ConflictError('Astrologer session mein aa rahi hai — thodi der wait karo')
     }
 
     // Agora token generate karo

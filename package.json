@@ -5,7 +5,7 @@
   "main": "dist/server.js",
   "scripts": {
     "dev": "tsx watch src/server.ts",
-    "build": "tsc --project tsconfig.build.json",
+    "build": "tsc --project tsconfig.build.json && tsc-alias -p tsconfig.build.json",
     "start": "node dist/server.js",
     "lint": "biome check --write .",
     "format": "prettier --write .",
@@ -43,6 +43,7 @@
     "@biomejs/biome": "^1.9.3",
     "@types/bcrypt": "^5.0.2",
     "@types/node": "^22.5.5",
+    "tsc-alias": "^1.8.10",
     "@types/pg": "^8.11.10",
     "drizzle-kit": "^0.24.2",
     "pino-pretty": "^11.2.2",
