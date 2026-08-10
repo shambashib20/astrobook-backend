@@ -57,11 +57,21 @@ export class AuthService {
     }
 
     const otp = String(Math.floor(100000 + Math.random() * 900000))
-    const otpHash = await bcrypt.hash(otp, 10)
+    // OTP is a 6-digit code with a 5 min expiry and a 3-attempt lockout
+    // (see verifyOtp) — bcrypt's default cost of 10 (~70-100ms) buys no
+    // real extra security here but ate the entire per-request latency
+    // budget. Cost 4 is still salted+hashed and takes ~1ms.
+    const otpHash = await bcrypt.hash(otp, 4)
     const expiresAt = new Date(Date.now() + 5 * 60 * 1000)
 
     await this.userRepository.createOtp(phone, otpHash, expiresAt)
-    await sendOtpSms(phone, otp)
+
+    // Don't make the client wait on MSG91's network round trip (200-500ms+)
+    // before we reply — the OTP is already persisted, so send the SMS in
+    // the background and let a failure surface in logs, not in latency.
+    sendOtpSms(phone, otp).catch((err) => {
+      console.error(`Failed to send OTP SMS to ${phone}:`, err?.message ?? err)
+    })
 
     return { otp }
   }
@@ -85,9 +95,16 @@ export class AuthService {
       throw BadRequestError('Wrong OTP')
     }
 
-    await this.userRepository.deleteOtp(otpRecord.id)
+    // These two don't depend on each other — deleting the used OTP and
+    // looking up the user are independent writes/reads. Each DB round
+    // trip to a remote Postgres costs real network latency, so run them
+    // concurrently instead of one after another.
+    const [, user0] = await Promise.all([
+      this.userRepository.deleteOtp(otpRecord.id),
+      this.userRepository.findByPhone(phone),
+    ])
 
-    let user = await this.userRepository.findByPhone(phone)
+    let user = user0
     const isNewUser = !user
 
     if (!user) {
@@ -246,8 +263,15 @@ export class AuthService {
     const expiresAt = new Date()
     expiresAt.setDate(expiresAt.getDate() + 30)
 
-    await this.sessionRepository.enforceSessionLimit(user.id)
-    await this.sessionRepository.create({ userId: user.id, refreshToken, expiresAt })
+    // enforceSessionLimit deletes (at most) an old session row; create()
+    // inserts a new one — different rows, no dependency between them, so
+    // there's no reason to pay for two sequential round trips to Neon.
+    // Worst case if they interleave oddly: the user briefly has one more
+    // session than MAX_SESSIONS_PER_USER, self-corrects next login.
+    await Promise.all([
+      this.sessionRepository.enforceSessionLimit(user.id),
+      this.sessionRepository.create({ userId: user.id, refreshToken, expiresAt }),
+    ])
 
     return { accessToken, refreshToken }
   }

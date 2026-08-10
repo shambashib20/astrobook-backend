@@ -13,6 +13,7 @@ import {
   pgEnum,
   unique,
   jsonb,
+  index,
 } from 'drizzle-orm/pg-core'
 import { users } from './users'
 
@@ -43,7 +44,9 @@ export const serviceRequestStatusEnum = pgEnum('service_request_status', [
 
 // ─── Consultation Services ───────────────────────────────────────────────────
 
-export const consultationServices = pgTable('consultation_services', {
+export const consultationServices = pgTable(
+  'consultation_services',
+  {
   id: uuid('id').primaryKey().defaultRandom(),
   astrologerId: uuid('astrologer_id')
     .notNull()
@@ -72,7 +75,16 @@ export const consultationServices = pgTable('consultation_services', {
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
   meta: jsonb('meta').$type<any>(),
-})
+  },
+  (table) => ({
+    // "Get astrologer's services" (astrologer profile page, service list) —
+    // unindexed FK, full table scan without this.
+    astrologerIdIdx: index('consultation_services_astrologer_id_idx').on(table.astrologerId),
+    // Category browsing filters `tag = ANY(tags)` — needs GIN, a btree
+    // index can't serve array-containment predicates.
+    tagsGinIdx: index('consultation_services_tags_gin_idx').using('gin', table.tags),
+  }),
+)
 
 // ─── Consultation Service Variants ────────────────────────────────────────────
 // Har service (Basic ho ya astrologer-created "normal") ke saath fixed 5
@@ -139,7 +151,9 @@ export const availabilityWindows = pgTable(
 
 // ─── Appointments ────────────────────────────────────────────────────────────
 
-export const appointments = pgTable('appointments', {
+export const appointments = pgTable(
+  'appointments',
+  {
   id: uuid('id').primaryKey().defaultRandom(),
   astrologerId: uuid('astrologer_id')
     .notNull()
@@ -189,27 +203,53 @@ export const appointments = pgTable('appointments', {
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
   meta: jsonb('meta').$type<any>(),
-})
+  },
+  (table) => ({
+    // "My bookings" / booking history — the single most frequently hit
+    // query pattern on this table, previously an unindexed FK scan.
+    userIdIdx: index('appointments_user_id_idx').on(table.userId),
+    // Astrologer calendar/dashboard — same story, plus scheduledAt so
+    // "today's sessions" range queries can use the index directly.
+    astrologerIdScheduledAtIdx: index('appointments_astrologer_id_scheduled_at_idx').on(
+      table.astrologerId,
+      table.scheduledAt,
+    ),
+    serviceIdIdx: index('appointments_service_id_idx').on(table.serviceId),
+    // Bundle lookups (parent -> children)
+    parentIdIdx: index('appointments_parent_id_idx').on(table.parentId),
+  }),
+)
 
 // ─── Payments ────────────────────────────────────────────────────────────────
 
-export const payments = pgTable('payments', {
-  id: uuid('id').primaryKey().defaultRandom(),
-  appointmentId: uuid('appointment_id')
-    .notNull()
-    .references(() => appointments.id, { onDelete: 'cascade' }),
-  razorpayOrderId: varchar('razorpay_order_id', { length: 255 }),
-  razorpayPaymentId: varchar('razorpay_payment_id', { length: 255 }),
-  razorpaySignature: varchar('razorpay_signature', { length: 512 }),
-  amount: numeric('amount', { precision: 10, scale: 2 }).notNull(),
-  status: paymentStatusEnum('status').notNull().default('pending'),
-  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
-  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
-})
+export const payments = pgTable(
+  'payments',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    appointmentId: uuid('appointment_id')
+      .notNull()
+      .references(() => appointments.id, { onDelete: 'cascade' }),
+    razorpayOrderId: varchar('razorpay_order_id', { length: 255 }),
+    razorpayPaymentId: varchar('razorpay_payment_id', { length: 255 }),
+    razorpaySignature: varchar('razorpay_signature', { length: 512 }),
+    amount: numeric('amount', { precision: 10, scale: 2 }).notNull(),
+    status: paymentStatusEnum('status').notNull().default('pending'),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => ({
+    appointmentIdIdx: index('payments_appointment_id_idx').on(table.appointmentId),
+    // Razorpay webhook handler looks payments up by order id — every
+    // webhook delivery was a full table scan without this.
+    razorpayOrderIdIdx: index('payments_razorpay_order_id_idx').on(table.razorpayOrderId),
+  }),
+)
 
 // ─── Service Requests (Mid-session upsell) ───────────────────────────────────
 
-export const serviceRequests = pgTable('service_requests', {
+export const serviceRequests = pgTable(
+  'service_requests',
+  {
   id: uuid('id').primaryKey().defaultRandom(),
   parentAppointmentId: uuid('parent_appointment_id')
     .notNull()
@@ -235,7 +275,15 @@ export const serviceRequests = pgTable('service_requests', {
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
   expiresAt: timestamp('expires_at', { withTimezone: true }),
-})
+  },
+  (table) => ({
+    parentAppointmentIdIdx: index('service_requests_parent_appointment_id_idx').on(
+      table.parentAppointmentId,
+    ),
+    astrologerIdIdx: index('service_requests_astrologer_id_idx').on(table.astrologerId),
+    userIdIdx: index('service_requests_user_id_idx').on(table.userId),
+  }),
+)
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 

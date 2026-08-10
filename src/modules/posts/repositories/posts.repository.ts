@@ -1,6 +1,6 @@
 import { eq, desc, asc, sql, and, getTableColumns } from 'drizzle-orm'
 import type { Database } from '@/core/database/client'
-import { posts, postLikes, postComments, users } from '@/core/database/schema'
+import { posts, postLikes, postComments, users, consultationServices } from '@/core/database/schema'
 import type { NewPost, NewPostComment } from '@/core/database/schema/posts'
 
 type FindFilters = {
@@ -33,6 +33,11 @@ export class PostsRepository {
       isLikedByMe: viewerId
         ? sql<boolean>`EXISTS(SELECT 1 FROM ${postLikes} WHERE ${postLikes.postId} = ${posts.id} AND ${postLikes.userId} = ${viewerId})`
         : sql<boolean>`false`,
+      // Feed pe "Book Now" ke liye — pehle frontend har unique astrologer ke
+      // liye alag getServices() call karta tha post-fetch ke baad (N parallel
+      // Neon round trips). Ab yahin correlated subquery se aata hai, koi
+      // extra request nahi lagti.
+      basicServiceId: sql<string | null>`(SELECT id FROM ${consultationServices} WHERE ${consultationServices.astrologerId} = ${posts.astrologerId} AND ${consultationServices.isBasic} = true AND ${consultationServices.isActive} = true LIMIT 1)`,
     }
   }
 

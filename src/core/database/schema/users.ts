@@ -1,6 +1,8 @@
+import { sql } from 'drizzle-orm'
 import {
   boolean,
   date,
+  index,
   integer,
   jsonb,
   numeric,
@@ -24,7 +26,9 @@ export const verificationStatusEnum = pgEnum('verification_status', [
 
 // ─── Users ────────────────────────────────────────────────────────────────────
 
-export const users = pgTable('users', {
+export const users = pgTable(
+  'users',
+  {
   id:           uuid('id').primaryKey().defaultRandom(),
   phone:        varchar('phone', { length: 20 }).unique(),       // primary identity — OTP se
   email:        varchar('email', { length: 255 }).unique(),      // optional
@@ -43,7 +47,17 @@ export const users = pgTable('users', {
   meta:         jsonb('meta').$type<any>(),
   createdAt:    timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   updatedAt:    timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
-})
+  },
+  (table) => ({
+    // GET /astrologers filters `WHERE is_astrologer = true` — a boolean
+    // column is a bad index candidate on its own (low cardinality), but a
+    // *partial* index (only the true rows) stays small and fast even as
+    // the overall users table grows into the millions.
+    isAstrologerIdx: index('users_is_astrologer_idx')
+      .on(table.isAstrologer)
+      .where(sql`${table.isAstrologer} = true`),
+  }),
+)
 
 // ─── Astrologer Profiles ──────────────────────────────────────────────────────
 
@@ -92,14 +106,27 @@ export const astrologerProfiles = pgTable('astrologer_profiles', {
 
 // ─── OTP Verifications ────────────────────────────────────────────────────────
 
-export const otpVerifications = pgTable('otp_verifications', {
-  id:        uuid('id').primaryKey().defaultRandom(),
-  phone:     varchar('phone', { length: 20 }).notNull(),
-  otpHash:   varchar('otp_hash', { length: 255 }).notNull(),    // bcrypt hash
-  expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
-  attempts:  integer('attempts').notNull().default(0),           // max 3 wrong tries
-  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
-})
+export const otpVerifications = pgTable(
+  'otp_verifications',
+  {
+    id:        uuid('id').primaryKey().defaultRandom(),
+    phone:     varchar('phone', { length: 20 }).notNull(),
+    otpHash:   varchar('otp_hash', { length: 255 }).notNull(),    // bcrypt hash
+    expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+    attempts:  integer('attempts').notNull().default(0),           // max 3 wrong tries
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => ({
+    // Every OTP endpoint (send/verify/rate-limit-count) filters by phone.
+    // No unique constraint on this column (unlike users.phone), so it was
+    // an unindexed full table scan on every single auth request.
+    phoneIdx: index('otp_verifications_phone_idx').on(table.phone),
+    phoneCreatedAtIdx: index('otp_verifications_phone_created_at_idx').on(
+      table.phone,
+      table.createdAt,
+    ),
+  }),
+)
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 

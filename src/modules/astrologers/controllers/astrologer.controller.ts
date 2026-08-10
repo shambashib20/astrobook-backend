@@ -5,8 +5,12 @@ import type { AstrologerService } from '../services/astrologer.service'
 export class AstrologerController {
   constructor(private readonly astrologerService: AstrologerService) {}
 
-  getAll = async (_request: FastifyRequest, reply: FastifyReply) => {
-    const astrologers = await this.astrologerService.getAll()
+  getAll = async (request: FastifyRequest, reply: FastifyReply) => {
+    const { limit, offset } = request.query as { limit?: string; offset?: string }
+    // Clamp so a client can't force an unbounded/oversized scan.
+    const parsedLimit = Math.min(Math.max(Number(limit) || 50, 1), 100)
+    const parsedOffset = Math.max(Number(offset) || 0, 0)
+    const astrologers = await this.astrologerService.getAll(parsedLimit, parsedOffset)
     return reply.status(200).send({ astrologers })
   }
 

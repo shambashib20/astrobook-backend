@@ -63,13 +63,18 @@ export class UserRepository {
   // ─── OTP Methods ────────────────────────────────────────────────────────────
 
   async createOtp(phone: string, otpHash: string, expiresAt: Date) {
-    // Purane expired OTPs clean karo
-    await this.db
+    // Purane expired OTPs clean karo — this is pure housekeeping
+    // (findLatestOtp already filters expiresAt > now(), so a stale row
+    // sitting around doesn't affect correctness). Every DB round trip on
+    // a remote Postgres (Neon) costs real network latency in series, so
+    // don't make the client wait on this — fire it and move on.
+    this.db
       .delete(otpVerifications)
       .where(and(
         eq(otpVerifications.phone, phone),
         lt(otpVerifications.expiresAt, new Date())
       ))
+      .catch((err) => console.error('OTP cleanup failed (non-fatal):', err))
 
     const [otp] = await this.db
       .insert(otpVerifications)

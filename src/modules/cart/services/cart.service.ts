@@ -159,15 +159,19 @@ export class CartService {
       notes: { userId, itemCount: String(appointments.length) },
     })
 
-    // Har appointment ke liye ek payment row — sab same razorpayOrderId share karte hain
-    for (const { appointment, price } of appointments) {
-      await this.paymentRepository.create({
-        appointmentId: appointment.id,
-        razorpayOrderId: order.id,
-        amount: String(price),
-        status: 'pending',
-      })
-    }
+    // Har appointment ke liye ek payment row — sab same razorpayOrderId share karte hain.
+    // Independent inserts, no shared state — run concurrently instead of
+    // one DB round trip at a time.
+    await Promise.all(
+      appointments.map(({ appointment, price }) =>
+        this.paymentRepository.create({
+          appointmentId: appointment.id,
+          razorpayOrderId: order.id,
+          amount: String(price),
+          status: 'pending',
+        }),
+      ),
+    )
 
     // Ab yeh cart items "graduate" ho chuke hain appointments mein — cart se hata do
     await this.cartRepository.deleteMany(
@@ -214,34 +218,41 @@ export class CartService {
     })
 
     const paymentRows = await this.paymentRepository.findAllByOrderId(razorpayOrderId)
-    const ownedAppointments = []
-    for (const row of paymentRows) {
-      const appointment = await this.appointmentRepository.findById(row.appointmentId)
-      if (!appointment || appointment.userId !== userId) continue // safety check
-      const { channel, token } = this.agoraService.generateToken(appointment.id)
-      const confirmed = await this.appointmentRepository.update(appointment.id, {
-        status: 'confirmed',
-        agoraChannel: channel,
-        agoraToken: token,
-      })
-      ownedAppointments.push(confirmed)
 
-      // Dono taraf notify karo — user ko confirm, astrologer ko naya booking + payment
-      this.pushNotificationService.sendToUser(appointment.userId, {
-        title: 'Booking Confirmed!',
-        body: 'Tumhari booking confirm ho gayi hai',
-        data: { type: 'booking_confirmed', appointmentId: appointment.id },
-      })
-      this.pushNotificationService.sendToUser(appointment.astrologerId, {
-        title: 'Naya Booking Mila',
-        body: `₹${row.amount} ka payment mila — naya booking confirm ho gaya`,
-        data: { type: 'new_booking', appointmentId: appointment.id },
-      })
-    }
+    // Each row is an independent appointment confirmation — no shared
+    // state between iterations, so fan them out instead of one DB round
+    // trip at a time (checkout with N cart items was paying N sequential
+    // find+update round trips).
+    const results = await Promise.all(
+      paymentRows.map(async (row) => {
+        const appointment = await this.appointmentRepository.findById(row.appointmentId)
+        if (!appointment || appointment.userId !== userId) return null // safety check
+        const { channel, token } = this.agoraService.generateToken(appointment.id)
+        const confirmed = await this.appointmentRepository.update(appointment.id, {
+          status: 'confirmed',
+          agoraChannel: channel,
+          agoraToken: token,
+        })
+
+        // Dono taraf notify karo — user ko confirm, astrologer ko naya booking + payment
+        this.pushNotificationService.sendToUser(appointment.userId, {
+          title: 'Booking Confirmed!',
+          body: 'Tumhari booking confirm ho gayi hai',
+          data: { type: 'booking_confirmed', appointmentId: appointment.id },
+        })
+        this.pushNotificationService.sendToUser(appointment.astrologerId, {
+          title: 'Naya Booking Mila',
+          body: `₹${row.amount} ka payment mila — naya booking confirm ho gaya`,
+          data: { type: 'new_booking', appointmentId: appointment.id },
+        })
+
+        return confirmed
+      }),
+    )
 
     return {
       message: 'Payment successful',
-      appointments: ownedAppointments,
+      appointments: results.filter((r) => r !== null),
     }
   }
 }

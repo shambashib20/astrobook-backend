@@ -12,7 +12,15 @@
       "PowerShell(cd \"C:\\\\Users\\\\majum\\\\OneDrive\\\\Desktop\\\\mrgroup-projects\\\\astrobook-backend\"; npx tsc --noEmit 2>&1 | Where-Object { $_ -match \"firebase|Firebase|supabase|Supabase\" })",
       "PowerShell(graphify install *)",
       "Bash(python \"graphify-out/mf.py\")",
-      "Bash(rm -f graphify-out/.graphify_detect.json graphify-out/.graphify_extract.json graphify-out/.graphify_ast.json graphify-out/.graphify_semantic.json graphify-out/.graphify_analysis.json graphify-out/mf.py graphify-out/.graphify_chunk_*.json)"
+      "Bash(rm -f graphify-out/.graphify_detect.json graphify-out/.graphify_extract.json graphify-out/.graphify_ast.json graphify-out/.graphify_semantic.json graphify-out/.graphify_analysis.json graphify-out/mf.py graphify-out/.graphify_chunk_*.json)",
+      "PowerShell(Get-Process *)",
+      "PowerShell(Stop-Process *)",
+      "mcp__code-review-graph__build_or_update_graph_tool",
+      "Bash(npx tsc *)",
+      "Bash(npm ls *)",
+      "Bash(npm view *)",
+      "Bash(npx --yes drizzle-kit@0.31.10 studio)",
+      "Bash(npx --yes drizzle-kit@0.26.2 studio)"
     ]
   },
   "enabledMcpjsonServers": [

@@ -231,7 +231,20 @@ export class AdminRepository {
       if (status === 'approved') {
         await tx
           .update(users)
-          .set({ role: 'astrologer', isAstrologer: true, updatedAt: sql`now()` })
+          .set({
+            role: 'astrologer',
+            isAstrologer: true,
+            updatedAt: sql`now()`,
+            // Naye astrologer ko default commissionPercentage:0 milta hai
+            // meta mein — sirf tab set karte hain jab already nahi hai
+            // (existing meta keys preserve rehte hain, aur re-approval pe
+            // admin-set value overwrite nahi hoti).
+            meta: sql`CASE
+              WHEN COALESCE(${users.meta}, '{}'::jsonb) ? 'commissionPercentage'
+                THEN COALESCE(${users.meta}, '{}'::jsonb)
+              ELSE COALESCE(${users.meta}, '{}'::jsonb) || '{"commissionPercentage": 0}'::jsonb
+            END`,
+          })
           .where(eq(users.id, userId))
 
         const [existingBasic] = await tx
