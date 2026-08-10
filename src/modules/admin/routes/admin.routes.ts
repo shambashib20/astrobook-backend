@@ -25,6 +25,70 @@ export async function adminRoutes(app: FastifyInstance) {
     adminController.getStats,
   )
 
+  // GET /admin/health — system health for the admin panel (DB, cron, server)
+  app.get(
+    `${prefix}/health`,
+    {
+      preHandler: guard,
+      schema: {
+        tags: ['Admin'],
+        summary: 'System health (Neon DB, background cron jobs, server) with logs on failure',
+        security: [{ bearerAuth: [] }],
+        response: {
+          200: {
+            type: 'object',
+            properties: {
+              status: { type: 'string' },
+              timestamp: { type: 'string' },
+              checks: {
+                type: 'object',
+                properties: {
+                  server: {
+                    type: 'object',
+                    properties: {
+                      status: { type: 'string' },
+                      uptimeSeconds: { type: 'number' },
+                      memoryUsageMb: { type: 'number' },
+                    },
+                  },
+                  database: {
+                    type: 'object',
+                    properties: {
+                      status: { type: 'string' },
+                      latencyMs: { type: 'number' },
+                      error: { type: ['string', 'null'] },
+                      logs: { type: 'array' },
+                    },
+                  },
+                  cron: {
+                    type: 'object',
+                    properties: {
+                      status: { type: 'string' },
+                      jobs: { type: 'array' },
+                      logs: { type: 'array' },
+                    },
+                  },
+                  agora: {
+                    type: 'object',
+                    properties: {
+                      status: { type: 'string' },
+                      reason: { type: 'string' },
+                      error: { type: 'string' },
+                      month: { type: 'string' },
+                      totalMinutes: { type: 'number' },
+                      totalHours: { type: 'number' },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+    },
+    adminController.getSystemHealth,
+  )
+
   // GET /admin/upload-token — ImageKit signed token (document uploads)
   app.get(
     `${prefix}/upload-token`,
@@ -187,6 +251,27 @@ export async function adminRoutes(app: FastifyInstance) {
       },
     },
     adminController.updateDocuments,
+  )
+
+  app.patch(
+    `${prefix}/astrologers/:id/commission`,
+    {
+      preHandler: guard,
+      schema: {
+        tags: ['Admin'],
+        summary: "Update an astrologer's commission percentage",
+        security: [{ bearerAuth: [] }],
+        params: { type: 'object', required: ['id'], properties: { id: { type: 'string', format: 'uuid' } } },
+        body: {
+          type: 'object',
+          required: ['commissionPercentage'],
+          properties: {
+            commissionPercentage: { type: 'number', minimum: 0, maximum: 100 },
+          },
+        },
+      },
+    },
+    adminController.updateCommission,
   )
 
   app.patch(

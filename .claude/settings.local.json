@@ -20,7 +20,21 @@
       "Bash(npm ls *)",
       "Bash(npm view *)",
       "Bash(npx --yes drizzle-kit@0.31.10 studio)",
-      "Bash(npx --yes drizzle-kit@0.26.2 studio)"
+      "Bash(npx --yes drizzle-kit@0.26.2 studio)",
+      "Bash(netstat -ano)",
+      "Bash(powershell -NoProfile -Command \"Stop-Process -Id 1808 -Force\")",
+      "Bash(powershell -NoProfile -Command \"Get-Process -Id 16568 | Select-Object Id,ProcessName,Path,StartTime | Format-List\")",
+      "Bash(powershell -NoProfile -Command \"Stop-Process -Id 16568 -Force\")",
+      "Bash(powershell -NoProfile -Command \"Get-Process -Id 31856 | Select-Object Id,ProcessName,Path,StartTime | Format-List; Write-Output '---'; Get-CimInstance Win32_Process -Filter \\\\\"ProcessId=31856\\\\\" | Select-Object CommandLine\")",
+      "Bash(powershell -NoProfile -Command \"\\(Get-CimInstance Win32_Process -Filter \\\\\"ProcessId=31856\\\\\"\\).CommandLine\")",
+      "Bash(powershell -NoProfile -Command \"Stop-Process -Id 31856 -Force\")",
+      "Bash(powershell -NoProfile -Command \"Get-CimInstance Win32_Process | Where-Object { \\\\$_.CommandLine -match 'tsx' -or \\\\$_.CommandLine -match 'src/server.ts' } | Select-Object ProcessId, ParentProcessId, CommandLine | Format-List\")",
+      "Bash(powershell -NoProfile -Command \"Get-CimInstance Win32_Process -Filter 'ProcessId=19248 or ProcessId=19608' | Select-Object ProcessId, ParentProcessId, Name; Write-Output '---parents---'; Get-CimInstance Win32_Process | Where-Object { \\\\$_.ProcessId -in \\(Get-CimInstance Win32_Process -Filter 'ProcessId=19248 or ProcessId=19608' | Select-Object -ExpandProperty ParentProcessId\\) } | Select-Object ProcessId, Name, CommandLine\")",
+      "Bash(powershell -NoProfile -Command \"Get-CimInstance Win32_Process -Filter 'ProcessId=29440 or ProcessId=30828' | Select-Object ProcessId, ParentProcessId, CommandLine | Format-List\")",
+      "Bash(powershell -NoProfile -Command \"Get-CimInstance Win32_Process -Filter 'ProcessId=33684 or ProcessId=15576' | Select-Object ProcessId, ParentProcessId, Name, CommandLine | Format-List\")",
+      "Bash(powershell -NoProfile -Command \"Get-CimInstance Win32_Process -Filter 'ProcessId=15420 or ProcessId=6520' | Select-Object ProcessId, ParentProcessId, Name, CommandLine | Format-List\")",
+      "Bash(powershell -NoProfile -Command \"Stop-Process -Id 19248,19608,25980,15448,18112,20528,32108 -Force -ErrorAction SilentlyContinue\")",
+      "Bash(powershell -NoProfile -Command 'Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -match '\\\\''tsx watch'\\\\'' } | Select-Object ProcessId, CommandLine')"
     ]
   },
   "enabledMcpjsonServers": [

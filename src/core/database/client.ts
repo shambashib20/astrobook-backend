@@ -1,6 +1,14 @@
 import { drizzle } from 'drizzle-orm/node-postgres'
 import { Pool } from 'pg'
 import { env } from '@/config/env'
+import {
+  DB_KEEPALIVE_INTERVAL_MS,
+  DB_KEEPALIVE_JOB,
+  recordCronError,
+  recordCronRun,
+  recordCronSuccess,
+} from '@/core/utils/cron-heartbeat'
+import { pushLog } from '@/core/utils/log-buffer'
 import * as schema from './schema'
 
 let pool: Pool | null = null
@@ -29,11 +37,17 @@ export function getPool(): Pool {
     // No-op on an already-warm connection — this is just a `SELECT 1`.
     keepAliveInterval = setInterval(
       () => {
-        pool?.query('SELECT 1').catch((err) => {
-          console.error('DB keep-alive ping failed (non-fatal):', err.message)
-        })
+        recordCronRun(DB_KEEPALIVE_JOB)
+        pool
+          ?.query('SELECT 1')
+          .then(() => recordCronSuccess(DB_KEEPALIVE_JOB))
+          .catch((err) => {
+            console.error('DB keep-alive ping failed (non-fatal):', err.message)
+            recordCronError(DB_KEEPALIVE_JOB, err)
+            pushLog('db', 'error', 'Keep-alive ping failed', { error: err.message })
+          })
       },
-      4 * 60_000,
+      DB_KEEPALIVE_INTERVAL_MS,
     )
     keepAliveInterval.unref()
 
@@ -46,6 +60,7 @@ export function getPool(): Pool {
       // pool se remove kar deta hai — hume sirf log karna hai, process
       // maarne ki zarurat nahi.
       console.error('DB pool: idle client error (recovered, pool continues)', err.message)
+      pushLog('db', 'error', 'Idle client error (recovered)', { error: err.message })
     })
   }
   return pool
