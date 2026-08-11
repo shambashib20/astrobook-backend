@@ -4,6 +4,7 @@ import {
   ListAstrologersQuerySchema,
   ListPostsQuerySchema,
   ListUsersQuerySchema,
+  UpdateCommissionSchema,
   UpdateDocumentsSchema,
   UpdateUserRoleSchema,
   UpdateVerificationSchema,
@@ -19,6 +20,15 @@ export class AdminController {
   getStats = async (_request: FastifyRequest, reply: FastifyReply) => {
     const stats = await this.adminService.getStats()
     return reply.status(200).send(stats)
+  }
+
+  // GET /admin/health
+  // Always 200 — the panel reads `status`/`checks[*].status` from the body
+  // to render up/degraded, rather than branching on the HTTP status code
+  // (a 503 here made clients treat a "degraded" reading as a failed request).
+  getSystemHealth = async (_request: FastifyRequest, reply: FastifyReply) => {
+    const health = await this.adminService.getSystemHealth()
+    return reply.status(200).send(health)
   }
 
   // GET /admin/upload-token
@@ -91,6 +101,14 @@ export class AdminController {
     const dto = UpdateDocumentsSchema.parse(request.body)
     const profile = await this.adminService.updateDocuments(id, dto)
     return reply.status(200).send({ message: 'Documents updated', profile })
+  }
+
+  // PATCH /admin/astrologers/:id/commission
+  updateCommission = async (request: FastifyRequest, reply: FastifyReply) => {
+    const { id } = request.params as { id: string }
+    const dto = UpdateCommissionSchema.parse(request.body)
+    const user = await this.adminService.updateCommission(id, dto)
+    return reply.status(200).send({ message: 'Commission percentage updated', user })
   }
 
   // PATCH /admin/astrologers/:id/verification

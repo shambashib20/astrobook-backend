@@ -141,6 +141,12 @@ export class AdminRepository {
       document2Url: astrologerProfiles.document2Url,
       rejectionReason: astrologerProfiles.rejectionReason,
       verifiedAt: astrologerProfiles.verifiedAt,
+      // commissionPercentage sits in users.meta (jsonb), not its own column —
+      // see backfill-commission-percentage.ts / updateVerification above.
+      // Cast to float8 (not ::numeric) — the pg driver returns NUMERIC
+      // columns as strings to avoid precision loss, which silently turned
+      // this into a string in the JSON response despite the number type here.
+      commissionPercentage: sql<number | null>`(${users.meta}->>'commissionPercentage')::float8`,
     }
   }
 
@@ -231,7 +237,20 @@ export class AdminRepository {
       if (status === 'approved') {
         await tx
           .update(users)
-          .set({ role: 'astrologer', isAstrologer: true, updatedAt: sql`now()` })
+          .set({
+            role: 'astrologer',
+            isAstrologer: true,
+            updatedAt: sql`now()`,
+            // Naye astrologer ko default commissionPercentage:0 milta hai
+            // meta mein — sirf tab set karte hain jab already nahi hai
+            // (existing meta keys preserve rehte hain, aur re-approval pe
+            // admin-set value overwrite nahi hoti).
+            meta: sql`CASE
+              WHEN COALESCE(${users.meta}, '{}'::jsonb) ? 'commissionPercentage'
+                THEN COALESCE(${users.meta}, '{}'::jsonb)
+              ELSE COALESCE(${users.meta}, '{}'::jsonb) || '{"commissionPercentage": 0}'::jsonb
+            END`,
+          })
           .where(eq(users.id, userId))
 
         const [existingBasic] = await tx
@@ -285,6 +304,19 @@ export class AdminRepository {
 
       return profile
     })
+  }
+
+  async updateCommissionPercentage(userId: string, commissionPercentage: number) {
+    const [user] = await this.db
+      .update(users)
+      .set({
+        // Merge into existing meta — other keys (if any) stay untouched.
+        meta: sql`COALESCE(${users.meta}, '{}'::jsonb) || jsonb_build_object('commissionPercentage', ${commissionPercentage}::numeric)`,
+        updatedAt: sql`now()`,
+      })
+      .where(eq(users.id, userId))
+      .returning()
+    return user ?? null
   }
 
   // ── Posts (moderation) ──────────────────────────────────────────────────────

@@ -44,13 +44,21 @@ export class SessionRepository {
   /**
    * Enforce max sessions per user.
    * If user has >= MAX_SESSIONS_PER_USER, delete the oldest one.
+   *
+   * Previously fetched every column (including two jsonb blobs) of every
+   * session just to count them and find the oldest. Selecting only `id`
+   * (backed by the userId+createdAt index) cuts the row size and lets
+   * this be an index-only scan instead of a full-row heap fetch.
    */
   async enforceSessionLimit(userId: string): Promise<void> {
-    const userSessions = await this.findByUserId(userId)
+    const rows = await this.db
+      .select({ id: sessions.id })
+      .from(sessions)
+      .where(eq(sessions.userId, userId))
+      .orderBy(desc(sessions.createdAt))
 
-    if (userSessions.length >= env.MAX_SESSIONS_PER_USER) {
-      // Delete the oldest session
-      const oldestSession = userSessions[userSessions.length - 1]
+    if (rows.length >= env.MAX_SESSIONS_PER_USER) {
+      const oldestSession = rows[rows.length - 1]
       if (oldestSession) {
         await this.deleteById(oldestSession.id)
       }

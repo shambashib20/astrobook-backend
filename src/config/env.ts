@@ -46,6 +46,12 @@ const envSchema = z.object({
   // server boot hi nahi hoga (fail-fast), silently undefined nahi jayega
   AGORA_APP_ID: z.string().min(1, 'AGORA_APP_ID is required'),
   AGORA_APP_CERTIFICATE: z.string().min(1, 'AGORA_APP_CERTIFICATE is required'),
+  // RESTful "Usage Inquiry" API creds — separate from the App ID/Certificate
+  // pair above (those only sign RTC/RTM tokens). Generated in Agora Console
+  // under Restful API. Optional: until these are added, the admin usage
+  // endpoint reports itself as "not configured" instead of failing boot.
+  AGORA_CUSTOMER_ID: z.string().optional(),
+  AGORA_CUSTOMER_SECRET: z.string().optional(),
 
   // Razorpay
   RAZORPAY_KEY_ID: z.string().min(1, 'RAZORPAY_KEY_ID is required'),

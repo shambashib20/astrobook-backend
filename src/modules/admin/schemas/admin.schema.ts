@@ -47,6 +47,11 @@ export const UpdateVerificationSchema = z.object({
 })
 export type UpdateVerificationDto = z.infer<typeof UpdateVerificationSchema>
 
+export const UpdateCommissionSchema = z.object({
+  commissionPercentage: z.number().min(0).max(100),
+})
+export type UpdateCommissionDto = z.infer<typeof UpdateCommissionSchema>
+
 // ─── Posts (moderation) ────────────────────────────────────────────────────
 
 export const ListPostsQuerySchema = PaginationQuerySchema.extend({

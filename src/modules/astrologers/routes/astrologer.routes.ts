@@ -19,6 +19,13 @@ export async function astrologerRoutes(app: FastifyInstance) {
       schema: {
         tags: ['Astrologers'],
         summary: 'Get all astrologers',
+        querystring: {
+          type: 'object',
+          properties: {
+            limit: { type: 'integer', minimum: 1, maximum: 100, default: 50 },
+            offset: { type: 'integer', minimum: 0, default: 0 },
+          },
+        },
       },
     },
     astrologerController.getAll,

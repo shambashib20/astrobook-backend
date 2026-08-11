@@ -1,6 +1,14 @@
 import { buildApp } from './app'
 import { env } from './config/env'
 import { closeDb, getDb } from './core/database/client'
+import {
+  SESSION_SWEEP_INTERVAL_MS,
+  SESSION_SWEEP_JOB,
+  recordCronError,
+  recordCronRun,
+  recordCronSuccess,
+} from './core/utils/cron-heartbeat'
+import { pushLog } from './core/utils/log-buffer'
 import { AppointmentRepository } from './modules/consultation/repositories/appointment.repository'
 import { PushNotificationService } from './core/services/push-notification.service'
 
@@ -16,13 +24,21 @@ async function start() {
   const appointmentRepo = new AppointmentRepository(getDb())
   const pushNotificationService = new PushNotificationService(getDb())
   const timeoutSweepInterval = setInterval(async () => {
+    recordCronRun(SESSION_SWEEP_JOB)
+    let hadError = false
+
     try {
       const completed = await appointmentRepo.completeTimedOutSessions()
       if (completed.length > 0) {
         app.log.info({ count: completed.length }, 'Auto-completed timed-out sessions')
       }
     } catch (err) {
+      hadError = true
       app.log.error(err, 'Session auto-timeout sweep failed')
+      recordCronError(SESSION_SWEEP_JOB, err)
+      pushLog('cron', 'error', 'Session auto-timeout sweep failed', {
+        error: err instanceof Error ? err.message : String(err),
+      })
     }
 
     try {
@@ -44,9 +60,16 @@ async function start() {
         app.log.info({ count: needingReminder.length }, 'Sent session-starting-soon reminders')
       }
     } catch (err) {
+      hadError = true
       app.log.error(err, 'Session reminder sweep failed')
+      recordCronError(SESSION_SWEEP_JOB, err)
+      pushLog('cron', 'error', 'Session reminder sweep failed', {
+        error: err instanceof Error ? err.message : String(err),
+      })
     }
-  }, 60 * 1000)
+
+    if (!hadError) recordCronSuccess(SESSION_SWEEP_JOB)
+  }, SESSION_SWEEP_INTERVAL_MS)
 
   // Graceful shutdown
   const shutdown = async (signal: string) => {

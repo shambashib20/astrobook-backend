@@ -31,6 +31,11 @@ export async function buildApp() {
     requestIdHeader: 'x-request-id',
     requestIdLogLabel: 'requestId',
     genReqId: () => crypto.randomUUID(),
+    // Fastify already logs "incoming request"/"request completed" on every
+    // request via its built-in onRequest/onResponse hooks. requestLoggerPlugin
+    // (registered in registerPlugins) does the exact same thing with the same
+    // fields, so every request was paying for two log writes instead of one.
+    disableRequestLogging: true,
   })
 
   // Register plugins (cors, helmet, JWT, error handlers, etc.)

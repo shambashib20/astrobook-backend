@@ -11,8 +11,41 @@ import {
 export class AstrologerRepository {
   constructor(private readonly db: Database) {}
 
-  async findAll() {
-    return this.db.select().from(users).where(eq(users.isAstrologer, true))
+  // Unbounded before — fetched every astrologer row (every column) with no
+  // limit, so response time scaled linearly with total astrologer count.
+  //
+  // Basic service price/id ab yahin LEFT JOIN se aata hai. Pehle frontend
+  // list ke baad har astrologer ke liye alag se getServices() call karta
+  // tha (N parallel Neon round trips, ek list mein 20 astrologers matlab 20
+  // extra queries) — jo Neon ke cold-start/pooled-connection latency ke
+  // saath milke poore tab switch ko multiple seconds tak freeze kar deta
+  // tha. Ek hi query mein sab aane se woh N+1 poora khatam ho gaya.
+  async findAll(limit = 50, offset = 0) {
+    const rows = await this.db
+      .select({
+        user: users,
+        basicServiceId: consultationServices.id,
+        basicServicePrice: consultationServices.price,
+      })
+      .from(users)
+      .leftJoin(
+        consultationServices,
+        and(
+          eq(consultationServices.astrologerId, users.id),
+          eq(consultationServices.isBasic, true),
+          eq(consultationServices.isActive, true),
+        ),
+      )
+      .where(eq(users.isAstrologer, true))
+      .orderBy(desc(users.createdAt))
+      .limit(limit)
+      .offset(offset)
+
+    return rows.map((row) => ({
+      ...row.user,
+      basicServiceId: row.basicServiceId,
+      basicPrice: row.basicServicePrice,
+    }))
   }
 
   async findById(id: string) {
@@ -29,35 +62,44 @@ export class AstrologerRepository {
   // (Choose Duration section) yehi endpoint use karta hai aur ab alag se
   // variants fetch nahi karta — agar yahan attach na karein toh woh section
   // hamesha khaali/loading dikhega.
+  // Was 2 sequential round trips (services, then variants filtered by the
+  // service ids just fetched — a real data dependency between them). A
+  // single LEFT JOIN gets both in one round trip; we just have to
+  // de-duplicate the repeated service columns client-side afterwards.
   async findServices(astrologerId: string) {
-    const services = await this.db
-      .select()
+    const rows = await this.db
+      .select({
+        service: consultationServices,
+        variant: consultationServiceVariants,
+      })
       .from(consultationServices)
+      .leftJoin(
+        consultationServiceVariants,
+        eq(consultationServiceVariants.serviceId, consultationServices.id),
+      )
       .where(
         and(
           eq(consultationServices.astrologerId, astrologerId),
           eq(consultationServices.isActive, true),
         ),
       )
-      .orderBy(desc(consultationServices.isBasic), consultationServices.createdAt)
-
-    if (services.length === 0) return []
-
-    const allVariants = await this.db
-      .select()
-      .from(consultationServiceVariants)
-      .where(
-        inArray(
-          consultationServiceVariants.serviceId,
-          services.map((s) => s.id),
-        ),
+      .orderBy(
+        desc(consultationServices.isBasic),
+        consultationServices.createdAt,
+        asc(consultationServiceVariants.durationMinutes),
       )
-      .orderBy(asc(consultationServiceVariants.durationMinutes))
 
-    return services.map((service) => ({
-      ...service,
-      variants: allVariants.filter((v) => v.serviceId === service.id),
-    }))
+    const serviceMap = new Map<string, (typeof rows)[number]['service'] & { variants: NonNullable<(typeof rows)[number]['variant']>[] }>()
+    for (const row of rows) {
+      let entry = serviceMap.get(row.service.id)
+      if (!entry) {
+        entry = { ...row.service, variants: [] }
+        serviceMap.set(row.service.id, entry)
+      }
+      if (row.variant) entry.variants.push(row.variant)
+    }
+
+    return Array.from(serviceMap.values())
   }
 
   async findSlots(astrologerId: string) {
