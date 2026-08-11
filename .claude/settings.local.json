@@ -34,7 +34,12 @@
       "Bash(powershell -NoProfile -Command \"Get-CimInstance Win32_Process -Filter 'ProcessId=33684 or ProcessId=15576' | Select-Object ProcessId, ParentProcessId, Name, CommandLine | Format-List\")",
       "Bash(powershell -NoProfile -Command \"Get-CimInstance Win32_Process -Filter 'ProcessId=15420 or ProcessId=6520' | Select-Object ProcessId, ParentProcessId, Name, CommandLine | Format-List\")",
       "Bash(powershell -NoProfile -Command \"Stop-Process -Id 19248,19608,25980,15448,18112,20528,32108 -Force -ErrorAction SilentlyContinue\")",
-      "Bash(powershell -NoProfile -Command 'Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -match '\\\\''tsx watch'\\\\'' } | Select-Object ProcessId, CommandLine')"
+      "Bash(powershell -NoProfile -Command 'Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -match '\\\\''tsx watch'\\\\'' } | Select-Object ProcessId, CommandLine')",
+      "mcp__code-review-graph__semantic_search_nodes_tool",
+      "mcp__code-review-graph__get_architecture_overview_tool",
+      "WebSearch",
+      "WebFetch(domain:docs.agora.io)",
+      "WebFetch(domain:docs-legacy.agora.io)"
     ]
   },
   "enabledMcpjsonServers": [
