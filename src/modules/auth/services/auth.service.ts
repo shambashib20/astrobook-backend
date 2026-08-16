@@ -56,8 +56,12 @@ export class AuthService {
       throw RateLimitError('Bahut zyada OTP requests. 10 min baad try karo.')
     }
 
-    const otp = String(Math.floor(100000 + Math.random() * 900000))
-    // OTP is a 6-digit code with a 5 min expiry and a 3-attempt lockout
+    if (env.NODE_ENV === 'development') {
+      console.log(`\n🔎 [SEND DEBUG] storing OTP for phone="${phone}" (len=${phone.length})\n`)
+    }
+
+    const otp = String(Math.floor(1000 + Math.random() * 9000))
+    // OTP is a 4-digit code with a 5 min expiry and a 3-attempt lockout
     // (see verifyOtp) — bcrypt's default cost of 10 (~70-100ms) buys no
     // real extra security here but ate the entire per-request latency
     // budget. Cost 4 is still salted+hashed and takes ~1ms.
@@ -81,6 +85,17 @@ export class AuthService {
   async verifyOtp(phone: string, otp: string): Promise<AuthResponse> {
     const otpRecord = await this.userRepository.findLatestOtp(phone)
 
+    if (env.NODE_ENV === 'development') {
+      console.log(
+        `\n🔎 [VERIFY DEBUG] incoming phone="${phone}" incoming otp="${otp}" (len=${otp.length}) ` +
+        `→ found row? ${!!otpRecord} ` +
+        (otpRecord
+          ? `row.id=${otpRecord.id} row.attempts=${otpRecord.attempts} row.expiresAt=${otpRecord.expiresAt} row.otpHash="${otpRecord.otpHash}"`
+          : '(no non-expired row for this exact phone)') +
+        '\n'
+      )
+    }
+
     if (!otpRecord) {
       throw BadRequestError('OTP expired ya bheja nahi gaya. Dobara try karo.')
     }
@@ -90,6 +105,11 @@ export class AuthService {
     }
 
     const isMatch = await bcrypt.compare(otp, otpRecord.otpHash)
+
+    if (env.NODE_ENV === 'development') {
+      console.log(`🔎 [VERIFY DEBUG] bcrypt.compare("${otp}", storedHash) → ${isMatch}\n`)
+    }
+
     if (!isMatch) {
       await this.userRepository.incrementOtpAttempts(otpRecord.id)
       throw BadRequestError('Wrong OTP')

@@ -27,7 +27,24 @@ export class AuthController {
 
   // POST /auth/verify-otp
   verifyOtp = async (request: FastifyRequest, reply: FastifyReply) => {
-    const { phone, otp } = VerifyOtpSchema.parse(request.body)
+    if (env.NODE_ENV === 'development') {
+      console.log(
+        `\n🔎 [CONTROLLER DEBUG] raw request.body = ${JSON.stringify(request.body)}\n`
+      )
+    }
+    const parseResult = VerifyOtpSchema.safeParse(request.body)
+    if (!parseResult.success) {
+      if (env.NODE_ENV === 'development') {
+        console.log(
+          `🔎 [CONTROLLER DEBUG] Zod validation FAILED: ${JSON.stringify(parseResult.error.issues)}\n`
+        )
+      }
+      return reply.status(400).send({
+        success: false,
+        message: parseResult.error.issues[0]?.message ?? 'Invalid request',
+      })
+    }
+    const { phone, otp } = parseResult.data
     const result = await this.authService.verifyOtp(phone, otp)
     return reply.status(200).send({ success: true, data: result })
   }

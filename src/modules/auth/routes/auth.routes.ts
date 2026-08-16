@@ -82,7 +82,7 @@ export async function authRoutes(app: FastifyInstance) {
           required: ['phone', 'otp'],
           properties: {
             phone: { type: 'string' },
-            otp: { type: 'string', minLength: 6, maxLength: 6 },
+            otp: { type: 'string', minLength: 4, maxLength: 4 },
           },
         },
       },

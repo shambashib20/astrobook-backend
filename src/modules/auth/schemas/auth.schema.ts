@@ -16,7 +16,7 @@ export const VerifyOtpSchema = z.object({
     .regex(/^\+91[6-9]\d{9}$/, 'Valid Indian phone number daalo'),
   otp: z
     .string()
-    .length(6, 'OTP 6 digits ka hona chahiye')
+    .length(4, 'OTP 4 digits ka hona chahiye')
     .regex(/^\d+$/, 'OTP sirf numbers'),
 })
 

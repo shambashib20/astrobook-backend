@@ -6,3 +6,4 @@ drizzle/
 *.tsbuildinfo
 .DS_Store
 astrobook-*.json
+*.zip
