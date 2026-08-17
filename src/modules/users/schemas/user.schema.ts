@@ -1,4 +1,26 @@
 import { z } from 'zod'
+import { ALL_CATEGORIES } from '@/modules/categories/constants'
+
+const VALID_CATEGORY_IDS = new Set<string>(ALL_CATEGORIES.map((c) => c.id))
+
+// Categories module (`/categories`) hi single source of truth hai — post
+// tags aur user interests dono isi taxonomy ke ids use karte hain, taaki
+// "interest X wale user ko category X ke posts dikhao" jaisa matching
+// kaam kare.
+//
+// Purane users (jo categories-fix se pehle onboard/edit ho chuke the) ke
+// DB mein abhi bhi stale values ho sakti hain (jaise "Numerology" label,
+// naye "numerology" id ki jagah). Agar hum strict reject karte (invalid id
+// mila toh poori request fail), toh aise users kabhi apna profile save hi
+// nahi kar paate — chahe woh sirf naam ya bio hi badalna chahte ho,
+// interests ko haath tak na lagayen. Isliye reject nahi, silently filter
+// karte hain — jo bhi stale/invalid values hain woh drop ho jaati hain,
+// baaki save chalta rehta hai. User ko agli baar interests screen khaali
+// dikhegi (jaisa already tha), lekin save kabhi block nahi hoga.
+const interestsField = z
+  .array(z.string())
+  .optional()
+  .transform((ids) => ids?.filter((id) => VALID_CATEGORY_IDS.has(id)))
 
 export const RegisterPushTokenSchema = z.object({
   expoPushToken: z.string().min(1),
@@ -10,13 +32,13 @@ export const OnboardingSchema = z.object({
   name:        z.string().min(2).max(255),
   email:       z.string().email().optional(),
   dateOfBirth: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
-  interests:   z.array(z.string()).optional(),
+  interests:   interestsField,
 })
 
 export const UpdateProfileSchema = z.object({
   name:        z.string().min(2).max(255).optional(),
   dateOfBirth: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
-  interests:   z.array(z.string()).optional(),
+  interests:   interestsField,
   avatarUrl:   z.string().url().optional(),
   bio:         z.string().max(500).optional(),
 })
@@ -64,9 +86,3 @@ export const UserResponseSchema = z.object({
 export type OnboardingDto    = z.infer<typeof OnboardingSchema>
 export type UpdateProfileDto = z.infer<typeof UpdateProfileSchema>
 export type UserResponse     = z.infer<typeof UserResponseSchema>
-
-export const INTEREST_OPTIONS = [
-  'Numerology', 'Vastu', 'Past Life', 'Reiki', 'Tarot',
-  'Astrology', 'Palmistry', 'Face Reading', 'Kundli',
-  'Horoscope', 'Gemstones', 'Meditation',
-] as const

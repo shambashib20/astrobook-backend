@@ -1,6 +1,11 @@
 import type { FastifyInstance } from 'fastify'
 import { getDb } from '@/core/database/client'
 import { authenticate, optionalAuthenticate } from '@/modules/auth'
+import { UserRepository } from '@/modules/users/repositories/user.repository'
+import { FollowsRepository } from '@/modules/follows/repositories/follows.repository'
+import { NotificationsRepository } from '@/modules/notifications/repositories/notifications.repository'
+import { NotificationsService } from '@/modules/notifications/services/notifications.service'
+import { PushNotificationService } from '@/core/services/push-notification.service'
 import { PostsRepository } from '../repositories/posts.repository'
 import { PostsService } from '../services/posts.service'
 import { PostsController } from '../controller/posts.controller'
@@ -8,7 +13,12 @@ import { PostsController } from '../controller/posts.controller'
 export async function postsRoutes(app: FastifyInstance) {
   const db = getDb()
   const postsRepository = new PostsRepository(db)
-  const postsService    = new PostsService(postsRepository)
+  const userRepository = new UserRepository(db)
+  const followsRepository = new FollowsRepository(db)
+  const notificationsRepository = new NotificationsRepository(db)
+  const pushNotificationService = new PushNotificationService(db)
+  const notificationsService = new NotificationsService(notificationsRepository, pushNotificationService)
+  const postsService    = new PostsService(postsRepository, userRepository, followsRepository, notificationsService)
   const postsController = new PostsController(postsService)
 
   // GET /posts — public, feed ke liye (agar logged in ho toh isLikedByMe milega)

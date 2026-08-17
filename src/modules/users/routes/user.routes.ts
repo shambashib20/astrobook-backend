@@ -4,7 +4,7 @@ import { authenticate } from '@/modules/auth'
 import type { FastifyInstance } from 'fastify'
 import { UserController } from '../controllers/user.controller'
 import { UserRepository } from '../repositories/user.repository'
-import { INTEREST_OPTIONS } from '../schemas/user.schema'
+import { ALL_CATEGORIES } from '@/modules/categories/constants'
 import { UserService } from '../services/user.service'
 
 export async function userRoutes(app: FastifyInstance) {
@@ -58,7 +58,7 @@ export async function userRoutes(app: FastifyInstance) {
             dateOfBirth: { type: 'string', description: 'Format: YYYY-MM-DD' },
             interests: {
               type: 'array',
-              items: { type: 'string', enum: [...INTEREST_OPTIONS] },
+              items: { type: 'string', enum: ALL_CATEGORIES.map((c) => c.id) },
               minItems: 1,
             },
           },
@@ -238,29 +238,5 @@ export async function userRoutes(app: FastifyInstance) {
       },
     },
     userController.getAstrologerApplicationStatus,
-  )
-
-  // GET /users/interests (utility endpoint to get available interests)
-  app.get(
-    `${prefix}/interests`,
-    {
-      schema: {
-        tags: ['Users'],
-        summary: 'Get available interest options for onboarding',
-        response: {
-          200: {
-            type: 'object',
-            properties: {
-              interests: { type: 'array', items: { type: 'string' } },
-            },
-          },
-        },
-      },
-    },
-    async (_request, reply) => {
-      return reply.status(200).send({
-        interests: [...INTEREST_OPTIONS],
-      })
-    }
   )
 }

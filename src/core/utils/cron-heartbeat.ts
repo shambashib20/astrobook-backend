@@ -13,6 +13,13 @@ export const SESSION_SWEEP_INTERVAL_MS = 60 * 1000
 export const DB_KEEPALIVE_JOB = 'db-keepalive'
 export const DB_KEEPALIVE_INTERVAL_MS = 4 * 60_000
 
+// 7-din se purani notifications delete karne wala sweep — retention window
+// mein kaafi slack hai (koi bhi ek notification 7-8 din tak rehti hai chahe
+// kabhi cleanup chale), isliye har minute chalane ki zaroorat nahi — 6 ghante
+// mein ek baar kaafi hai, DB pe unnecessary DELETE load nahi banta.
+export const NOTIFICATION_CLEANUP_JOB = 'notification-cleanup'
+export const NOTIFICATION_CLEANUP_INTERVAL_MS = 6 * 60 * 60 * 1000
+
 type JobState = {
   lastRunAt: Date | null
   lastSuccessAt: Date | null

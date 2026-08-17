@@ -149,17 +149,18 @@ export class BookingService {
     const isAstrologer = requesterId === appointment.astrologerId
     const now = new Date()
 
-    // Simplify: dono astrologer aur user ko EXACT same time-gate — koi
-    // early "green room" access nahi (pehle astrologer ko 5 min pehle mil
-    // jaata tha, jo confusing tha — asymmetric aur user ko lagta"kyun mujhe
-    // wait karna pada"). Ab dono ke liye ek hi rule: scheduled time se
-    // pehle koi bhi real join nahi kar sakta.
-    if (now < appointment.scheduledAt) {
-      const minutesLeft = Math.ceil(
-        (appointment.scheduledAt.getTime() - now.getTime()) / 60000,
-      )
+    // JOIN_GRACE_MINUTES — frontend isi value se apna countdown/auto-join
+    // decide karta hai (app/session/[appointmentId].tsx mein bhi 5 hai,
+    // dono jagah match hona zaroori hai). Dono roles ke liye symmetric hai
+    // (na sirf astrologer ko early access — jo pehle confusing tha).
+    const JOIN_GRACE_MINUTES = 5
+    const joinOpensAt = new Date(
+      appointment.scheduledAt.getTime() - JOIN_GRACE_MINUTES * 60000,
+    )
+    if (now < joinOpensAt) {
+      const minutesLeft = Math.ceil((joinOpensAt.getTime() - now.getTime()) / 60000)
       throw BadRequestError(
-        `Session abhi shuru nahi hua — ${minutesLeft} minute baad shuru hoga`,
+        `Session abhi shuru nahi hua — ${minutesLeft} minute baad join khulega`,
       )
     }
 
@@ -212,10 +213,18 @@ export class BookingService {
     const appointment = await this.appointmentRepository.findById(appointmentId)
     if (!appointment) throw NotFoundError('Appointment not found')
 
-    // Dono mein se koi bhi (user ya astrologer) session end kar sakta hai —
-    // real phone-call jaisa hi: ek taraf se kaate toh dono ke liye khatam
     if (appointment.userId !== requesterId && appointment.astrologerId !== requesterId) {
       throw ForbiddenError('You are not part of this session')
+    }
+
+    // Sirf astrologer session poori tarah end kar sakta hai. User agar
+    // beech mein nikal jaaye (galti se app close ho jaaye, ya "Leave" tap
+    // kare) toh session "ongoing" hi rehta hai — user dobara isi booking
+    // se rejoin kar sakta hai jab tak astrologer end na kare ya duration
+    // khatam na ho jaaye (background cron sweep automatically complete
+    // kar dega tab).
+    if (appointment.astrologerId !== requesterId) {
+      throw ForbiddenError('Sirf astrologer session end kar sakta hai')
     }
 
     if (appointment.status !== 'ongoing') {

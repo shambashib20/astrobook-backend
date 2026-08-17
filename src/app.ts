@@ -10,6 +10,8 @@ import { cartRoutes } from './modules/cart/routes/cart.routes'
 import { categoriesRoutes } from './modules/categories/routes/categories.routes'
 import { paymentRoutes } from './modules/payment/routes/payment.routes'
 import { postsRoutes } from './modules/posts'
+import { followsRoutes } from './modules/follows'
+import { notificationsRoutes } from './modules/notifications'
 
 export async function buildApp() {
   const app = Fastify({
@@ -78,6 +80,8 @@ export async function buildApp() {
   await app.register(cartRoutes, { prefix: apiPrefix })
   await app.register(astrologerRoutes, { prefix: apiPrefix })
   await app.register(postsRoutes, { prefix: apiPrefix })
+  await app.register(followsRoutes, { prefix: apiPrefix })
+  await app.register(notificationsRoutes, { prefix: apiPrefix })
   await app.register(categoriesRoutes, { prefix: apiPrefix })
   await app.register(adminRoutes, { prefix: apiPrefix })
   return app

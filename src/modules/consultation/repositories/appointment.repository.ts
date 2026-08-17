@@ -138,7 +138,8 @@ export class AppointmentRepository {
   }
 
   // "Session starting soon" push reminder ke liye — jo confirmed appointments
-  // agle 10 min mein shuru honge aur jinhe abhi tak reminder nahi bheja gaya
+  // agle 5 min mein shuru honge (JOIN_GRACE_MINUTES se match, jo frontend
+  // join-window bhi hai) aur jinhe abhi tak reminder nahi bheja gaya
   async findUpcomingNeedingReminder() {
     return this.db
       .select()
@@ -148,7 +149,7 @@ export class AppointmentRepository {
           eq(appointments.status, 'confirmed'),
           sql`${appointments.reminderSentAt} IS NULL`,
           gt(appointments.scheduledAt, sql`now()`),
-          lt(appointments.scheduledAt, sql`now() + interval '10 minutes'`),
+          lt(appointments.scheduledAt, sql`now() + interval '5 minutes'`),
         ),
       )
   }

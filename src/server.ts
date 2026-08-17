@@ -4,6 +4,8 @@ import { closeDb, getDb } from './core/database/client'
 import {
   SESSION_SWEEP_INTERVAL_MS,
   SESSION_SWEEP_JOB,
+  NOTIFICATION_CLEANUP_INTERVAL_MS,
+  NOTIFICATION_CLEANUP_JOB,
   recordCronError,
   recordCronRun,
   recordCronSuccess,
@@ -11,6 +13,8 @@ import {
 import { pushLog } from './core/utils/log-buffer'
 import { AppointmentRepository } from './modules/consultation/repositories/appointment.repository'
 import { PushNotificationService } from './core/services/push-notification.service'
+import { NotificationsRepository } from './modules/notifications/repositories/notifications.repository'
+import { NotificationsService } from './modules/notifications/services/notifications.service'
 
 async function start() {
   const app = await buildApp()
@@ -46,12 +50,12 @@ async function start() {
       for (const appointment of needingReminder) {
         await pushNotificationService.sendToUser(appointment.userId, {
           title: 'Session Jaldi Shuru Hoga',
-          body: 'Tumhara session 10 minute mein shuru hone wala hai',
+          body: 'Tumhara session 5 minute mein shuru hone wala hai',
           data: { type: 'session_reminder', appointmentId: appointment.id },
         })
         await pushNotificationService.sendToUser(appointment.astrologerId, {
           title: 'Session Jaldi Shuru Hoga',
-          body: 'Tumhara session 10 minute mein shuru hone wala hai',
+          body: 'Tumhara session 5 minute mein shuru hone wala hai',
           data: { type: 'session_reminder', appointmentId: appointment.id },
         })
         await appointmentRepo.markReminderSent(appointment.id)
@@ -71,10 +75,36 @@ async function start() {
     if (!hadError) recordCronSuccess(SESSION_SWEEP_JOB)
   }, SESSION_SWEEP_INTERVAL_MS)
 
+  // ── Notification cleanup sweep ─────────────────────────────────────────────
+  // 7-din se purani notifications delete — sabhi users ki, ek saath. Table
+  // ko unbounded grow nahi hone dena, aur purani notifications user ke liye
+  // anyway relevant nahi rehtin.
+  const notificationsService = new NotificationsService(
+    new NotificationsRepository(getDb()),
+    pushNotificationService,
+  )
+  const notificationCleanupInterval = setInterval(async () => {
+    recordCronRun(NOTIFICATION_CLEANUP_JOB)
+    try {
+      const deletedCount = await notificationsService.cleanupOld()
+      if (deletedCount > 0) {
+        app.log.info({ count: deletedCount }, 'Cleaned up old notifications (7+ days)')
+      }
+      recordCronSuccess(NOTIFICATION_CLEANUP_JOB)
+    } catch (err) {
+      app.log.error(err, 'Notification cleanup sweep failed')
+      recordCronError(NOTIFICATION_CLEANUP_JOB, err)
+      pushLog('cron', 'error', 'Notification cleanup sweep failed', {
+        error: err instanceof Error ? err.message : String(err),
+      })
+    }
+  }, NOTIFICATION_CLEANUP_INTERVAL_MS)
+
   // Graceful shutdown
   const shutdown = async (signal: string) => {
     app.log.info(`Received ${signal}. Shutting down gracefully...`)
     clearInterval(timeoutSweepInterval)
+    clearInterval(notificationCleanupInterval)
 
     try {
       await app.close()
