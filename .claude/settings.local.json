@@ -39,7 +39,9 @@
       "mcp__code-review-graph__get_architecture_overview_tool",
       "WebSearch",
       "WebFetch(domain:docs.agora.io)",
-      "WebFetch(domain:docs-legacy.agora.io)"
+      "WebFetch(domain:docs-legacy.agora.io)",
+      "Bash(curl -s http://localhost:9000/docs/json)",
+      "Bash(node -e ' *)"
     ]
   },
   "enabledMcpjsonServers": [

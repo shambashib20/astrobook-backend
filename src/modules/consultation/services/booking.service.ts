@@ -36,6 +36,12 @@ function toUtcTimestamp(dateStr: string, timeStr: string, timezone: string): Dat
   return new Date(wrongUtcMs - (wrongLocalMs - wrongUtcMs))
 }
 
+function shiftDate(dateStr: string, days: number): string {
+  const [year, month, day] = dateStr.split('-').map(Number) as [number, number, number]
+  const shifted = new Date(Date.UTC(year, month - 1, day + days))
+  return shifted.toISOString().split('T')[0]!
+}
+
 // ─── BookingService ───────────────────────────────────────────────────────────
 
 // Scheduled time se kitne minute pehle join allowed hai
@@ -72,10 +78,21 @@ export class BookingService {
     if (isNaN(scheduledAt.getTime())) throw BadRequestError('Invalid scheduledAt datetime')
 
     // Availability check — us din ke saare windows mein se kisi ek ke andar
-    // scheduledAt aana chahiye (astrologer ke multiple time slots ho sakte hain)
-    const date = scheduledAtIso.split('T')[0]!
-    const availWindows = await this.consultationService.getAvailabilityForDate(astrologerId, date)
-    if (availWindows.length === 0) throw BadRequestError(`Astrologer not available on ${date}`)
+    // scheduledAt aana chahiye (astrologer ke multiple time slots ho sakte hain).
+    // scheduledAtIso ek UTC timestamp hai, isliye sirf uska date-part slice karna
+    // galat hai — astrologer ka local calendar date UTC date se ek din aage/peeche
+    // ho sakta hai (e.g. 3 AM IST = pichhle din ka UTC). Isliye UTC date ke aas-paas
+    // ke teeno candidate dates check karte hain aur actual timestamp match se decide
+    // karte hain ki slot kis window ke andar aata hai.
+    const utcDate = scheduledAtIso.split('T')[0]!
+    const candidateDates = [utcDate, shiftDate(utcDate, -1), shiftDate(utcDate, 1)]
+    const availWindowsByDate = await Promise.all(
+      candidateDates.map((d) => this.consultationService.getAvailabilityForDate(astrologerId, d)),
+    )
+    const availWindows = availWindowsByDate.flat()
+    if (availWindows.length === 0) {
+      throw BadRequestError(`Astrologer not available on ${utcDate}`)
+    }
 
     const matchingWindow = availWindows.find((w) => {
       const windowStart = toUtcTimestamp(w.date, w.startTime, w.timezone)
@@ -149,18 +166,17 @@ export class BookingService {
     const isAstrologer = requesterId === appointment.astrologerId
     const now = new Date()
 
-    // JOIN_GRACE_MINUTES — frontend isi value se apna countdown/auto-join
-    // decide karta hai (app/session/[appointmentId].tsx mein bhi 5 hai,
-    // dono jagah match hona zaroori hai). Dono roles ke liye symmetric hai
-    // (na sirf astrologer ko early access — jo pehle confusing tha).
-    const JOIN_GRACE_MINUTES = 5
-    const joinOpensAt = new Date(
-      appointment.scheduledAt.getTime() - JOIN_GRACE_MINUTES * 60000,
-    )
-    if (now < joinOpensAt) {
-      const minutesLeft = Math.ceil((joinOpensAt.getTime() - now.getTime()) / 60000)
+    // Simplify: dono astrologer aur user ko EXACT same time-gate — koi
+    // early "green room" access nahi (pehle astrologer ko 5 min pehle mil
+    // jaata tha, jo confusing tha — asymmetric aur user ko lagta"kyun mujhe
+    // wait karna pada"). Ab dono ke liye ek hi rule: scheduled time se
+    // pehle koi bhi real join nahi kar sakta.
+    if (now < appointment.scheduledAt) {
+      const minutesLeft = Math.ceil(
+        (appointment.scheduledAt.getTime() - now.getTime()) / 60000,
+      )
       throw BadRequestError(
-        `Session abhi shuru nahi hua — ${minutesLeft} minute baad join khulega`,
+        `Session abhi shuru nahi hua — ${minutesLeft} minute baad shuru hoga`,
       )
     }
 

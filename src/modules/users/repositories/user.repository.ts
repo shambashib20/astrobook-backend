@@ -93,4 +93,52 @@ export class UserRepository {
       .returning()
     return profile ?? null
   }
+
+  // ── Razorpay Route account onboarding ───────────────────────────────────────
+
+  // Razorpay's reference_id needs a stable id that already exists in our DB
+  // *before* the account call goes out — the astrologerProfiles row's own
+  // id, so the linked account ties back to exactly one profile. If the user
+  // hasn't submitted an astrologer application yet, create a bare pending
+  // row here rather than failing the onboarding step on that.
+  async ensureAstrologerProfile(userId: string) {
+    const [profile] = await this.db
+      .insert(astrologerProfiles)
+      .values({ userId, verificationStatus: 'pending' })
+      .onConflictDoUpdate({
+        target: astrologerProfiles.userId,
+        set: { updatedAt: sql`now()` },
+      })
+      .returning()
+    return profile!
+  }
+
+  async saveRazorpayAccount(
+    userId: string,
+    data: {
+      razorpayAccountId: string
+      razorpayAccountStatus: string
+      razorpayReferenceId: string
+      razorpayAccountResponse: unknown
+    },
+  ) {
+    const [profile] = await this.db
+      .insert(astrologerProfiles)
+      .values({
+        userId,
+        verificationStatus: 'pending',
+        ...data,
+        razorpayAccountCreatedAt: sql`now()`,
+      })
+      .onConflictDoUpdate({
+        target: astrologerProfiles.userId,
+        set: {
+          ...data,
+          razorpayAccountCreatedAt: sql`now()`,
+          updatedAt: sql`now()`,
+        },
+      })
+      .returning()
+    return profile ?? null
+  }
 }

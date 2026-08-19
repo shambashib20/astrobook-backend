@@ -83,6 +83,72 @@ export const UserResponseSchema = z.object({
   updatedAt:   z.date(),
 })
 
+// Razorpay Route linked-account onboarding — kicks off payout account
+// creation (POST /v2/accounts). email/phone are taken directly from this
+// request body (not the user's DB record) — Razorpay's contact details for
+// the linked account don't have to match the app-login identity 1:1.
+const RazorpayAddressSchema = z.object({
+  street1:     z.string().min(1),
+  street2:     z.string().optional(),
+  city:        z.string().min(1),
+  state:       z.string().min(1),
+  postalCode:  z.string().min(1),
+  country:     z.string().length(2).default('IN'),
+})
+
+// Razorpay's KYC requirements differ by business_type — e.g. a PAN's 4th
+// character encodes the holder type (P = individual, C = company, F = firm,
+// H = HUF, ...), so Razorpay validates the PAN format against whatever
+// business_type is declared here. Defaults to 'individual' so existing
+// callers that don't send it keep today's behavior.
+export const RazorpayBusinessTypeSchema = z.enum([
+  'individual',
+  'proprietorship',
+  'partnership',
+  'huf',
+  'private_limited',
+  'public_limited',
+  'llp',
+  'ngo',
+  'trust',
+  'society',
+  'not_yet_registered',
+  'other',
+])
+export type RazorpayBusinessType = z.infer<typeof RazorpayBusinessTypeSchema>
+
+// Accepts "9830012345", "+919830012345", or "919830012345" — strips a
+// leading +91/91 country code (if present) before validating the bare
+// 10-digit number. Razorpay always prepends +91 itself on its side (see the
+// sample response: "9830012345" in → "+919830012345" out), so we normalize
+// to the bare form before it goes into the payload.
+//
+// Length-gated on purpose: a plain length-agnostic `replace(/^\+?91/, '')`
+// would also mis-strip a real bare 10-digit number that happens to start
+// with "91" (e.g. "9134567890" is a valid number on its own), cutting it
+// down to 8 digits. Only strip when the total length actually matches a
+// country-code-prefixed number (13 chars with "+91", 12 without).
+const indianMobileSchema = z
+  .string()
+  .transform((v) => {
+    if (v.startsWith('+91') && v.length === 13) return v.slice(3)
+    if (v.startsWith('91') && v.length === 12) return v.slice(2)
+    return v
+  })
+  .pipe(z.string().regex(/^[6-9]\d{9}$/, 'Enter a valid 10-digit Indian mobile number'))
+
+export const CreateRazorpayAccountSchema = z.object({
+  email:              z.string().email(),
+  phone:              indianMobileSchema,
+  legalBusinessName: z.string().min(2).max(255),
+  contactName:        z.string().min(2).max(255).optional(),
+  businessType:       RazorpayBusinessTypeSchema.default('individual'),
+  category:           z.string().min(1),
+  subcategory:        z.string().min(1),
+  address:            RazorpayAddressSchema,
+})
+export type CreateRazorpayAccountDto = z.infer<typeof CreateRazorpayAccountSchema>
+
 export type OnboardingDto    = z.infer<typeof OnboardingSchema>
 export type UpdateProfileDto = z.infer<typeof UpdateProfileSchema>
 export type UserResponse     = z.infer<typeof UserResponseSchema>
