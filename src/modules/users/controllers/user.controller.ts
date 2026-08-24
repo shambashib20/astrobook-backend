@@ -1,6 +1,7 @@
 import type { PushNotificationService } from '@/core/services/push-notification.service'
 import type { FastifyReply, FastifyRequest } from 'fastify'
 import {
+  CreateRazorpayAccountSchema,
   OnboardingSchema,
   RegisterPushTokenSchema,
   RequestAstrologerUpgradeSchema,
@@ -87,6 +88,24 @@ export class UserController {
 
     return reply.status(200).send({
       message: 'Application submitted. Our team will review it soon.',
+    })
+  }
+
+  /**
+   * POST /users/me/razorpay-account
+   * Start Razorpay Route linked-account onboarding for a would-be astrologer.
+   */
+  startRazorpayOnboarding = async (request: FastifyRequest, reply: FastifyReply) => {
+    const user = request.user as { userId: string }
+    const dto = CreateRazorpayAccountSchema.parse(request.body)
+
+    const account = await this.userService.startRazorpayOnboarding(user.userId, dto)
+
+    return reply.status(201).send({
+      message: account.alreadyExists
+        ? 'Razorpay account already exists for this astrologer'
+        : 'Razorpay account created successfully',
+      account,
     })
   }
 }

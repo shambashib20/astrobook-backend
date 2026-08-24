@@ -99,6 +99,16 @@ export const astrologerProfiles = pgTable('astrologer_profiles', {
   // Pricing (default — services mein override hoga)
   basePrice:        numeric('base_price', { precision: 10, scale: 2 }),
 
+  // Razorpay Route linked account — astrologer ko payout lene ke liye
+  // Razorpay ke saath onboard hona padta hai. Yeh sirf account creation
+  // ka step hai (POST /v2/accounts) — KYC/bank-details wagera baad ke
+  // steps mein aayenge, tab tak status 'created' hi rahega.
+  razorpayAccountId:       varchar('razorpay_account_id', { length: 64 }).unique(),
+  razorpayAccountStatus:   varchar('razorpay_account_status', { length: 32 }),
+  razorpayReferenceId:     varchar('razorpay_reference_id', { length: 128 }),
+  razorpayAccountResponse: jsonb('razorpay_account_response').$type<any>(),
+  razorpayAccountCreatedAt: timestamp('razorpay_account_created_at', { withTimezone: true }),
+
   meta:             jsonb('meta').$type<any>(),
   createdAt:        timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   updatedAt:        timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),

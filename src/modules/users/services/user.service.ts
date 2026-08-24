@@ -1,6 +1,11 @@
 import { BadRequestError, NotFoundError } from '@/core/errors'
+import {
+  createRazorpayAccount,
+  generateRazorpayReferenceId,
+} from '@/core/services/razorpay-account.service'
 import type { UserRepository } from '../repositories/user.repository'
 import type {
+  CreateRazorpayAccountDto,
   OnboardingDto,
   RequestAstrologerUpgradeDto,
   UpdateProfileDto,
@@ -79,5 +84,69 @@ export class UserService {
     // (onConflictDoUpdate resets status back to 'pending')
 
     return this.userRepository.submitAstrologerApplication(userId, dto)
+  }
+
+  // ── Razorpay Route account onboarding ───────────────────────────────────────
+  // Astrologer ke payout account ka pehla step — POST /v2/accounts.
+  // email/phone ab is request body se hi aate hain (dto.email/dto.phone) —
+  // Razorpay ke liye contact details app-login identity se match karna
+  // zaroori nahi hai.
+
+  async startRazorpayOnboarding(userId: string, dto: CreateRazorpayAccountDto) {
+    const user = await this.userRepository.findById(userId)
+    if (!user) throw NotFoundError('User not found')
+
+    // Profile row must exist before we call Razorpay, so a fresh
+    // reference_id only ever gets minted (and persisted) once per profile.
+    const profile = await this.userRepository.ensureAstrologerProfile(userId)
+
+    // Already has a linked account — don't create a duplicate on Razorpay's
+    // side, just hand back what we already have. This (not the reference_id
+    // itself) is what makes repeated calls idempotent.
+    if (profile.razorpayAccountId) {
+      return {
+        id: profile.razorpayAccountId,
+        status: profile.razorpayAccountStatus,
+        referenceId: profile.razorpayReferenceId,
+        alreadyExists: true,
+      }
+    }
+
+    const account = await createRazorpayAccount({
+      email: dto.email,
+      phone: dto.phone,
+      legal_business_name: dto.legalBusinessName,
+      business_type: dto.businessType,
+      contact_name: dto.contactName ?? user.name ?? dto.legalBusinessName,
+      reference_id: generateRazorpayReferenceId(),
+      profile: {
+        category: dto.category,
+        subcategory: dto.subcategory,
+        addresses: {
+          registered: {
+            street1: dto.address.street1,
+            street2: dto.address.street2,
+            city: dto.address.city,
+            state: dto.address.state,
+            postal_code: dto.address.postalCode,
+            country: dto.address.country,
+          },
+        },
+      },
+    })
+
+    await this.userRepository.saveRazorpayAccount(userId, {
+      razorpayAccountId: account.id,
+      razorpayAccountStatus: account.status,
+      razorpayReferenceId: account.reference_id,
+      razorpayAccountResponse: account,
+    })
+
+    return {
+      id: account.id,
+      status: account.status,
+      referenceId: account.reference_id,
+      alreadyExists: false,
+    }
   }
 }

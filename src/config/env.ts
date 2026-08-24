@@ -56,6 +56,9 @@ const envSchema = z.object({
   // Razorpay
   RAZORPAY_KEY_ID: z.string().min(1, 'RAZORPAY_KEY_ID is required'),
   RAZORPAY_KEY_SECRET: z.string().min(1, 'RAZORPAY_KEY_SECRET is required'),
+  RAZORPAY_API_ENDPOINT: z.string().url().default('https://api.razorpay.com'),
+  RAZORPAY_API_VERSION_1: z.string().min(1).default('v1'),
+  RAZORPAY_API_VERSION_2: z.string().min(1).default('v2'),
 })
 
 const parsed = envSchema.safeParse(process.env)

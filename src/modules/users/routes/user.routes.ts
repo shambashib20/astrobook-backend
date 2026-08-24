@@ -239,4 +239,83 @@ export async function userRoutes(app: FastifyInstance) {
     },
     userController.getAstrologerApplicationStatus,
   )
+
+  // POST /users/me/razorpay-account
+  app.post(
+    `${prefix}/me/razorpay-account`,
+    {
+      preHandler: [authenticate],
+      schema: {
+        tags: ['Users'],
+        summary: 'Start Razorpay Route account onboarding (payouts) for an astrologer',
+        security: [{ bearerAuth: [] }],
+        body: {
+          type: 'object',
+          required: ['email', 'phone', 'legalBusinessName', 'category', 'subcategory', 'address'],
+          properties: {
+            email: { type: 'string', format: 'email' },
+            phone: {
+              type: 'string',
+              pattern: '^(\\+91|91)?[6-9]\\d{9}$',
+              description:
+                'Indian mobile number — with or without +91/91 country code (e.g. "9830012345" or "+919830012345")',
+            },
+            legalBusinessName: { type: 'string', minLength: 2, maxLength: 255 },
+            contactName: { type: 'string', minLength: 2, maxLength: 255 },
+            businessType: {
+              type: 'string',
+              enum: [
+                'individual',
+                'proprietorship',
+                'partnership',
+                'huf',
+                'private_limited',
+                'public_limited',
+                'llp',
+                'ngo',
+                'trust',
+                'society',
+                'not_yet_registered',
+                'other',
+              ],
+              default: 'individual',
+              description: 'Determines which PAN/KYC format Razorpay expects for this account',
+            },
+            category: { type: 'string' },
+            subcategory: { type: 'string' },
+            address: {
+              type: 'object',
+              required: ['street1', 'city', 'state', 'postalCode'],
+              properties: {
+                street1: { type: 'string' },
+                street2: { type: 'string' },
+                city: { type: 'string' },
+                state: { type: 'string' },
+                postalCode: { type: 'string' },
+                country: { type: 'string', minLength: 2, maxLength: 2, default: 'IN' },
+              },
+            },
+          },
+        },
+        response: {
+          201: {
+            type: 'object',
+            properties: {
+              message: { type: 'string' },
+              account: {
+                type: 'object',
+                properties: {
+                  id: { type: 'string' },
+                  status: { type: ['string', 'null'] },
+                  referenceId: { type: ['string', 'null'] },
+                  alreadyExists: { type: 'boolean' },
+                },
+              },
+            },
+          },
+        },
+      },
+    },
+    userController.startRazorpayOnboarding,
+  )
 }
