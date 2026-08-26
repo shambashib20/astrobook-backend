@@ -120,6 +120,11 @@ export async function userRoutes(app: FastifyInstance) {
               bio: { type: ['string', 'null'] },
               createdAt: { type: 'string' },
               updatedAt: { type: 'string' },
+              // Additive fields — old clients that don't read these keep
+              // working unchanged. null for non-astrologers and for
+              // astrologers who haven't started bank onboarding yet.
+              razorpayAccountId: { type: ['string', 'null'] },
+              razorpayAccountStatus: { type: ['string', 'null'] },
             },
           },
         },
@@ -317,5 +322,45 @@ export async function userRoutes(app: FastifyInstance) {
       },
     },
     userController.startBankOnboarding,
+  )
+
+  // GET /users/me/bank-onboarding — live account details from Razorpay
+  app.get(
+    `${prefix}/me/bank-onboarding`,
+    {
+      preHandler: [authenticate],
+      schema: {
+        tags: ['Users'],
+        summary: "Fetch the logged-in astrologer's live Razorpay account details",
+        security: [{ bearerAuth: [] }],
+        response: {
+          200: {
+            type: 'object',
+            properties: {
+              account: {
+                type: 'object',
+                additionalProperties: true,
+                properties: {
+                  id: { type: 'string' },
+                  type: { type: 'string' },
+                  status: { type: 'string' },
+                  email: { type: 'string' },
+                  phone: { type: 'string' },
+                  contact_name: { type: 'string' },
+                  reference_id: { type: 'string' },
+                  business_type: { type: 'string' },
+                  legal_business_name: { type: 'string' },
+                  customer_facing_business_name: { type: 'string' },
+                  created_at: { type: 'number' },
+                  profile: { type: 'object', additionalProperties: true },
+                  notes: { type: 'array' },
+                },
+              },
+            },
+          },
+        },
+      },
+    },
+    userController.getBankOnboardingStatus,
   )
 }

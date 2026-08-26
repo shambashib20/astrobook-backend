@@ -2,6 +2,7 @@ import { BadRequestError, NotFoundError } from '@/core/errors'
 import {
   createRazorpayAccount,
   generateRazorpayReferenceId,
+  getRazorpayAccount,
 } from '@/core/services/razorpay-account.service'
 import type { UserRepository } from '../repositories/user.repository'
 import type {
@@ -35,7 +36,16 @@ export class UserService {
       throw NotFoundError('User not found')
     }
 
-    return user
+    // Bank onboarding fields live on astrologer_profiles, not users — for a
+    // non-astrologer (or an astrologer who hasn't onboarded yet) this row
+    // simply won't exist, so both come back null rather than erroring.
+    const astrologerProfile = await this.userRepository.findAstrologerApplication(userId)
+
+    return {
+      ...user,
+      razorpayAccountId: astrologerProfile?.razorpayAccountId ?? null,
+      razorpayAccountStatus: astrologerProfile?.razorpayAccountStatus ?? null,
+    }
   }
 
   async updateProfile(userId: string, dto: UpdateProfileDto) {
@@ -148,5 +158,19 @@ export class UserService {
       referenceId: account.reference_id,
       alreadyExists: false,
     }
+  }
+
+  // GET /users/me/bank-onboarding — live status pulled straight from
+  // Razorpay (not just whatever we last cached in razorpayAccountResponse),
+  // keyed off the account id we saved for THIS user — never accepts an
+  // account id from the caller, so one user can't probe another's account.
+  async getBankOnboardingStatus(userId: string) {
+    const profile = await this.userRepository.findAstrologerApplication(userId)
+
+    if (!profile?.razorpayAccountId) {
+      throw NotFoundError('Bank onboarding has not been started for this astrologer yet')
+    }
+
+    return getRazorpayAccount(profile.razorpayAccountId)
   }
 }

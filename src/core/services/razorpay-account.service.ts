@@ -106,3 +106,33 @@ export async function createRazorpayAccount(
     throw err
   }
 }
+
+// GET /v2/accounts/:id — live account details (status, KYC progress, etc.)
+// for an account already created via createRazorpayAccount above. Same
+// Basic Auth, no request body.
+export async function getRazorpayAccount(accountId: string): Promise<RazorpayAccountResponse> {
+  try {
+    const { data } = await axios.get<RazorpayAccountResponse>(
+      `${RAZORPAY_ACCOUNTS_URL}/${accountId}`,
+      {
+        auth: {
+          username: env.RAZORPAY_KEY_ID,
+          password: env.RAZORPAY_KEY_SECRET,
+        },
+      },
+    )
+    return data
+  } catch (err) {
+    if (isAxiosError(err)) {
+      const razorpayMessage = err.response?.data?.error?.description
+      if (err.response?.status === 404) {
+        throw BadRequestError('No Razorpay account found for this id')
+      }
+      if (err.response && err.response.status < 500) {
+        throw BadRequestError(razorpayMessage ?? 'Failed to fetch Razorpay account')
+      }
+      throw InternalError(razorpayMessage ?? 'Razorpay is unreachable right now')
+    }
+    throw err
+  }
+}

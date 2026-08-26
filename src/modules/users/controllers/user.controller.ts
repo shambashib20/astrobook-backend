@@ -109,4 +109,16 @@ export class UserController {
       account,
     })
   }
+
+  /**
+   * GET /users/me/bank-onboarding
+   * Live Razorpay account details for the logged-in astrologer's saved
+   * account id — status, KYC/business info, etc., straight from Razorpay.
+   */
+  getBankOnboardingStatus = async (request: FastifyRequest, reply: FastifyReply) => {
+    const user = request.user as { userId: string }
+    const account = await this.userService.getBankOnboardingStatus(user.userId)
+
+    return reply.status(200).send({ account })
+  }
 }
