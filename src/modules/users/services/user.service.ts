@@ -86,13 +86,13 @@ export class UserService {
     return this.userRepository.submitAstrologerApplication(userId, dto)
   }
 
-  // ── Razorpay Route account onboarding ───────────────────────────────────────
+  // ── Bank onboarding (Razorpay Route linked account) ─────────────────────────
   // Astrologer ke payout account ka pehla step — POST /v2/accounts.
   // email/phone ab is request body se hi aate hain (dto.email/dto.phone) —
   // Razorpay ke liye contact details app-login identity se match karna
   // zaroori nahi hai.
 
-  async startRazorpayOnboarding(userId: string, dto: CreateRazorpayAccountDto) {
+  async startBankOnboarding(userId: string, dto: CreateRazorpayAccountDto) {
     const user = await this.userRepository.findById(userId)
     if (!user) throw NotFoundError('User not found')
 

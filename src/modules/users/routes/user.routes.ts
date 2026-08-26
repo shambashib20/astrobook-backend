@@ -240,14 +240,14 @@ export async function userRoutes(app: FastifyInstance) {
     userController.getAstrologerApplicationStatus,
   )
 
-  // POST /users/me/razorpay-account
+  // POST /users/me/bank-onboarding
   app.post(
-    `${prefix}/me/razorpay-account`,
+    `${prefix}/me/bank-onboarding`,
     {
       preHandler: [authenticate],
       schema: {
         tags: ['Users'],
-        summary: 'Start Razorpay Route account onboarding (payouts) for an astrologer',
+        summary: 'Bank onboarding — creates a Razorpay Route linked account (payouts) for an astrologer',
         security: [{ bearerAuth: [] }],
         body: {
           type: 'object',
@@ -316,6 +316,6 @@ export async function userRoutes(app: FastifyInstance) {
         },
       },
     },
-    userController.startRazorpayOnboarding,
+    userController.startBankOnboarding,
   )
 }

@@ -21,6 +21,8 @@ export async function swaggerPlugin(app: FastifyInstance) {
         { name: 'Health', description: 'Health check' },
         { name: 'Auth', description: 'Authentication & authorization' },
         { name: 'Users', description: 'User management' },
+        { name: 'YouTube', description: "Astrobook's YouTube channel feed" },
+        { name: 'Admin', description: 'Admin panel endpoints' },
       ],
       components: {
         securitySchemes: {
