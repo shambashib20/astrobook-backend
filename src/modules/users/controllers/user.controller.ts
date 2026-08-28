@@ -92,20 +92,33 @@ export class UserController {
   }
 
   /**
-   * POST /users/me/razorpay-account
-   * Start Razorpay Route linked-account onboarding for a would-be astrologer.
+   * POST /users/me/bank-onboarding
+   * Bank onboarding — creates a Razorpay Route linked account (payouts) for
+   * the logged-in astrologer.
    */
-  startRazorpayOnboarding = async (request: FastifyRequest, reply: FastifyReply) => {
+  startBankOnboarding = async (request: FastifyRequest, reply: FastifyReply) => {
     const user = request.user as { userId: string }
     const dto = CreateRazorpayAccountSchema.parse(request.body)
 
-    const account = await this.userService.startRazorpayOnboarding(user.userId, dto)
+    const account = await this.userService.startBankOnboarding(user.userId, dto)
 
     return reply.status(201).send({
       message: account.alreadyExists
-        ? 'Razorpay account already exists for this astrologer'
-        : 'Razorpay account created successfully',
+        ? 'Bank onboarding already completed for this astrologer'
+        : 'Bank onboarding completed — Razorpay account created',
       account,
     })
+  }
+
+  /**
+   * GET /users/me/bank-onboarding
+   * Live Razorpay account details for the logged-in astrologer's saved
+   * account id — status, KYC/business info, etc., straight from Razorpay.
+   */
+  getBankOnboardingStatus = async (request: FastifyRequest, reply: FastifyReply) => {
+    const user = request.user as { userId: string }
+    const account = await this.userService.getBankOnboardingStatus(user.userId)
+
+    return reply.status(200).send({ account })
   }
 }

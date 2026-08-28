@@ -12,6 +12,7 @@ import { paymentRoutes } from './modules/payment/routes/payment.routes'
 import { postsRoutes } from './modules/posts'
 import { followsRoutes } from './modules/follows'
 import { notificationsRoutes } from './modules/notifications'
+import { youtubeRoutes } from './modules/youtube'
 
 export async function buildApp() {
   const app = Fastify({
@@ -84,5 +85,6 @@ export async function buildApp() {
   await app.register(notificationsRoutes, { prefix: apiPrefix })
   await app.register(categoriesRoutes, { prefix: apiPrefix })
   await app.register(adminRoutes, { prefix: apiPrefix })
+  await app.register(youtubeRoutes, { prefix: apiPrefix })
   return app
 }

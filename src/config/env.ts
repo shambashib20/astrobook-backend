@@ -53,6 +53,14 @@ const envSchema = z.object({
   AGORA_CUSTOMER_ID: z.string().optional(),
   AGORA_CUSTOMER_SECRET: z.string().optional(),
 
+  // YouTube Data API v3 — public "latest videos" feed (Explore section).
+  // Optional: until these are set, GET /youtube/videos reports itself as
+  // not configured instead of failing server boot (same pattern as Agora's
+  // usage-inquiry creds above).
+  YOUTUBE_API_KEY: z.string().optional(),
+  YOUTUBE_CHANNEL_ID: z.string().optional(),
+  YOUTUBE_CACHE_TTL_MS: z.coerce.number().default(5 * 60_000),
+
   // Razorpay
   RAZORPAY_KEY_ID: z.string().min(1, 'RAZORPAY_KEY_ID is required'),
   RAZORPAY_KEY_SECRET: z.string().min(1, 'RAZORPAY_KEY_SECRET is required'),
