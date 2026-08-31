@@ -10,6 +10,7 @@ import {
 import axios from 'axios'
 import bcrypt from 'bcrypt'
 import { OAuth2Client } from 'google-auth-library'
+import { sendOtpWhatsApp } from '@/core/services/whatsapp.service'
 import type { SessionRepository } from '../repositories/session.repository'
 import type { UserRepository } from '../repositories/user.repository'
 import type { AuthResponse } from '../schemas/auth.schema'
@@ -19,23 +20,47 @@ interface JWTService {
   verify<T = any>(token: string): T
 }
 
-// ─── SMS Helper ───────────────────────────────────────────────────────────────
+// ─── SMS/WhatsApp Helper ────────────────────────────────────────────────────
+// Exported so other modules (e.g. users' phone-verification-during-onboarding
+// flow) send OTP the exact same way instead of duplicating the delivery logic.
+//
+// WhatsApp expects "91XXXXXXXXXX" (country code, no "+"). Callers pass phone
+// in different formats depending on which flow they came from (auth's
+// /send-otp uses "+91XXXXXXXXXX", users' phone-verification uses bare
+// "XXXXXXXXXX") — normalize here so both work regardless of caller.
+function toWhatsAppFormat(phone: string): string {
+  const digits = phone.replace(/\D/g, '') // strip +, spaces, etc.
+  if (digits.length === 10) return `91${digits}`
+  return digits // already has country code (e.g. "91XXXXXXXXXX")
+}
 
-async function sendOtpSms(phone: string, otp: string): Promise<void> {
+export async function sendOtpSms(phone: string, otp: string): Promise<void> {
+  // Dev mode mein bhi console log rakha hai (quick visual confirm ke liye),
+  // lekin ab yahin return nahi karte — WhatsApp abhi active testing mein
+  // hai, dev mein bhi real message jaana chahiye. SHOW_OTP_IN_RESPONSE
+  // (app ke debug-OTP autofill ke liye) alag se already kaam karta hai —
+  // yeh WhatsApp delivery ko block/replace nahi karta.
   if (env.NODE_ENV === 'development') {
     console.log(`\n🔐 [DEV OTP] ${phone} → ${otp}\n`)
-    return
   }
-  await axios.post(
-    'https://api.msg91.com/api/v5/otp',
-    {
-      authkey:     env.MSG91_AUTH_KEY,
-      template_id: env.MSG91_TEMPLATE_ID,
-      mobile:      phone.replace('+', ''),
-      otp,
-    },
-    { headers: { 'Content-Type': 'application/json' } }
-  )
+
+  // MSG91 SMS — commented out for now, MSG91 account/credits not set up
+  // yet. WhatsApp (below) is the active OTP channel. To re-enable SMS:
+  // uncomment this block, and uncomment MSG91_AUTH_KEY/MSG91_TEMPLATE_ID
+  // in src/config/env.ts.
+  //
+  // await axios.post(
+  //   'https://api.msg91.com/api/v5/otp',
+  //   {
+  //     authkey:     env.MSG91_AUTH_KEY,
+  //     template_id: env.MSG91_TEMPLATE_ID,
+  //     mobile:      phone.replace('+', ''),
+  //     otp,
+  //   },
+  //   { headers: { 'Content-Type': 'application/json' } }
+  // )
+
+  await sendOtpWhatsApp(toWhatsAppFormat(phone), otp)
 }
 
 // ─── AuthService ──────────────────────────────────────────────────────────────
@@ -70,12 +95,14 @@ export class AuthService {
 
     await this.userRepository.createOtp(phone, otpHash, expiresAt)
 
-    // Don't make the client wait on MSG91's network round trip (200-500ms+)
-    // before we reply — the OTP is already persisted, so send the SMS in
-    // the background and let a failure surface in logs, not in latency.
-    sendOtpSms(phone, otp).catch((err) => {
-      console.error(`Failed to send OTP SMS to ${phone}:`, err?.message ?? err)
-    })
+    // Pehle fire-and-forget tha (background mein bhejta, response turant
+    // de deta) — lekin WhatsApp delivery mein 10-15s lagte hain, isliye
+    // user OTP screen pe pahunch jaata tha message aane se pehle hi, aur
+    // 30s ka resend-timer usmein se already kaat chuka hota. Ab yahin
+    // await karte hain — response tabhi jaata hai jab WhatsApp confirm
+    // kar de, taaki frontend navigate hi tab kare jab message bhej diya
+    // gaya ho (ya fail hone par turant pata chal jaye, silently na ho).
+    await sendOtpSms(phone, otp)
 
     return { otp }
   }

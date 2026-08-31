@@ -1,6 +1,6 @@
 import type { Database } from '@/core/database/client'
-import { astrologerProfiles, users } from '@/core/database/schema'
-import { eq, sql } from 'drizzle-orm'
+import { astrologerProfiles, otpVerifications, users } from '@/core/database/schema'
+import { and, count, eq, gt, lt, sql } from 'drizzle-orm'
 import type {
   OnboardingDto,
   RequestAstrologerUpgradeDto,
@@ -140,5 +140,74 @@ export class UserRepository {
       })
       .returning()
     return profile ?? null
+  }
+
+  // ── Phone verification (Google-login users, during onboarding) ─────────────
+  // Reuses the same otp_verifications table as /auth/send-otp — logic mirrors
+  // auth module's UserRepository OTP methods (see src/modules/auth), just
+  // scoped under this module since it's driven by an authenticated userId
+  // rather than an anonymous login attempt.
+
+  async countRecentPhoneOtpRequests(phone: string): Promise<number> {
+    const tenMinAgo = new Date(Date.now() - 10 * 60 * 1000)
+    const [result] = await this.db
+      .select({ count: count() })
+      .from(otpVerifications)
+      .where(and(
+        eq(otpVerifications.phone, phone),
+        gt(otpVerifications.createdAt, tenMinAgo)
+      ))
+    return result?.count ?? 0
+  }
+
+  async createPhoneOtp(phone: string, otpHash: string, expiresAt: Date) {
+    // Housekeeping only — findLatestPhoneOtp already filters expiresAt > now(),
+    // so don't make the caller wait on this.
+    this.db
+      .delete(otpVerifications)
+      .where(and(
+        eq(otpVerifications.phone, phone),
+        lt(otpVerifications.expiresAt, new Date())
+      ))
+      .catch((err) => console.error('Phone OTP cleanup failed (non-fatal):', err))
+
+    const [otp] = await this.db
+      .insert(otpVerifications)
+      .values({ phone, otpHash, expiresAt })
+      .returning()
+    return otp!
+  }
+
+  async findLatestPhoneOtp(phone: string) {
+    const [otp] = await this.db
+      .select()
+      .from(otpVerifications)
+      .where(and(
+        eq(otpVerifications.phone, phone),
+        gt(otpVerifications.expiresAt, new Date())
+      ))
+      .orderBy(sql`${otpVerifications.createdAt} DESC`)
+      .limit(1)
+    return otp ?? null
+  }
+
+  async incrementPhoneOtpAttempts(id: string) {
+    await this.db
+      .update(otpVerifications)
+      .set({ attempts: sql`${otpVerifications.attempts} + 1` })
+      .where(eq(otpVerifications.id, id))
+  }
+
+  async deletePhoneOtp(id: string) {
+    await this.db.delete(otpVerifications).where(eq(otpVerifications.id, id))
+  }
+
+  async updatePhone(userId: string, phone: string) {
+    const [user] = await this.db
+      .update(users)
+      .set({ phone, updatedAt: sql`now()` })
+      .where(eq(users.id, userId))
+      .returning()
+    return user ?? null
   }
 }

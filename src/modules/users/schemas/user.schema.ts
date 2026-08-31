@@ -149,6 +149,20 @@ export const CreateRazorpayAccountSchema = z.object({
 })
 export type CreateRazorpayAccountDto = z.infer<typeof CreateRazorpayAccountSchema>
 
+// Phone verification during onboarding — for Google-login users who don't
+// have a phone on their account yet. Phone-login users never hit this (their
+// phone is already set from login), so this is purely additive.
+export const SendPhoneOtpSchema = z.object({
+  phone: indianMobileSchema,
+})
+export type SendPhoneOtpDto = z.infer<typeof SendPhoneOtpSchema>
+
+export const VerifyPhoneOtpSchema = z.object({
+  phone: indianMobileSchema,
+  otp:   z.string().length(4, 'OTP 4 digits ka hona chahiye'),
+})
+export type VerifyPhoneOtpDto = z.infer<typeof VerifyPhoneOtpSchema>
+
 export type OnboardingDto    = z.infer<typeof OnboardingSchema>
 export type UpdateProfileDto = z.infer<typeof UpdateProfileSchema>
 export type UserResponse     = z.infer<typeof UserResponseSchema>

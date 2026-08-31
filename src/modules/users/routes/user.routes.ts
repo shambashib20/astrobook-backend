@@ -324,6 +324,93 @@ export async function userRoutes(app: FastifyInstance) {
     userController.startBankOnboarding,
   )
 
+  // POST /users/me/phone/send-otp
+  // Google-login users add + verify a phone during onboarding. Authenticated
+  // (unlike /auth/send-otp), but still costs real SMS money — same rate
+  // limit shape as /auth/send-otp, keyed by (ip, phone).
+  app.post(
+    `${prefix}/me/phone/send-otp`,
+    {
+      preHandler: [authenticate],
+      config: {
+        rateLimit: {
+          max: 3,
+          timeWindow: '10 minutes',
+          hook: 'preHandler',
+          keyGenerator: (request: any) => `${request.ip}:${request.body?.phone ?? ''}`,
+        },
+      },
+      schema: {
+        tags: ['Users'],
+        summary: 'Onboarding ke dauran phone number pe OTP bhejo (Google-login users)',
+        security: [{ bearerAuth: [] }],
+        body: {
+          type: 'object',
+          required: ['phone'],
+          properties: {
+            phone: { type: 'string' },
+          },
+        },
+      },
+    },
+    userController.sendPhoneOtp,
+  )
+
+  // POST /users/me/phone/verify-otp
+  app.post(
+    `${prefix}/me/phone/verify-otp`,
+    {
+      preHandler: [authenticate],
+      config: {
+        rateLimit: {
+          max: 10,
+          timeWindow: '10 minutes',
+          hook: 'preHandler',
+          keyGenerator: (request: any) => `${request.ip}:${request.body?.phone ?? ''}`,
+        },
+      },
+      schema: {
+        tags: ['Users'],
+        summary: 'Phone OTP verify karo aur account se link karo',
+        security: [{ bearerAuth: [] }],
+        body: {
+          type: 'object',
+          required: ['phone', 'otp'],
+          properties: {
+            phone: { type: 'string' },
+            otp: { type: 'string', minLength: 4, maxLength: 4 },
+          },
+        },
+        response: {
+          200: {
+            type: 'object',
+            properties: {
+              user: {
+                type: 'object',
+                properties: {
+                  id: { type: 'string' },
+                  email: { type: ['string', 'null'] },
+                  phone: { type: ['string', 'null'] },
+                  name: { type: 'string' },
+                  dateOfBirth: { type: ['string', 'null'] },
+                  role: { type: 'string' },
+                  interests: { type: ['array', 'null'], items: { type: 'string' } },
+                  isOnboarded: { type: 'boolean' },
+                  isAstrologer: { type: 'boolean' },
+                  avatarUrl: { type: ['string', 'null'] },
+                  bio: { type: ['string', 'null'] },
+                  createdAt: { type: 'string' },
+                  updatedAt: { type: 'string' },
+                },
+              },
+            },
+          },
+        },
+      },
+    },
+    userController.verifyPhoneOtp,
+  )
+
   // GET /users/me/bank-onboarding — live account details from Razorpay
   app.get(
     `${prefix}/me/bank-onboarding`,

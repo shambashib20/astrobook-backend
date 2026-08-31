@@ -5,3 +5,4 @@ export {
   requireRole,
   requireOnboarded,
 } from './middleware/authenticate'
+export { sendOtpSms } from './services/auth.service'

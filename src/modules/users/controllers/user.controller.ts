@@ -1,3 +1,4 @@
+import { env } from '@/config/env'
 import type { PushNotificationService } from '@/core/services/push-notification.service'
 import type { FastifyReply, FastifyRequest } from 'fastify'
 import {
@@ -5,7 +6,9 @@ import {
   OnboardingSchema,
   RegisterPushTokenSchema,
   RequestAstrologerUpgradeSchema,
+  SendPhoneOtpSchema,
   UpdateProfileSchema,
+  VerifyPhoneOtpSchema,
 } from '../schemas/user.schema'
 import type { UserService } from '../services/user.service'
 
@@ -120,5 +123,39 @@ export class UserController {
     const account = await this.userService.getBankOnboardingStatus(user.userId)
 
     return reply.status(200).send({ account })
+  }
+
+  /**
+   * POST /users/me/phone/send-otp
+   * Phone verification during onboarding (Google-login users only).
+   * Wrapped { success, data } envelope — matches /auth/send-otp, which the
+   * app client already parses this endpoint the same way.
+   */
+  sendPhoneOtp = async (request: FastifyRequest, reply: FastifyReply) => {
+    const user = request.user as { userId: string }
+    const { phone } = SendPhoneOtpSchema.parse(request.body)
+
+    const { otp } = await this.userService.sendPhoneOtp(user.userId, phone)
+
+    // SHOW_OTP_IN_RESPONSE sirf test/staging servers ke liye — production
+    // .env mein yeh flag kabhi set nahi karna.
+    return reply.status(200).send({
+      success: true,
+      data: env.SHOW_OTP_IN_RESPONSE ? { debugOtp: otp } : {},
+    })
+  }
+
+  /**
+   * POST /users/me/phone/verify-otp
+   * Raw { user } response — matches the rest of the /users/me/* routes
+   * (unwrapped, unlike /auth/verify-otp).
+   */
+  verifyPhoneOtp = async (request: FastifyRequest, reply: FastifyReply) => {
+    const user = request.user as { userId: string }
+    const { phone, otp } = VerifyPhoneOtpSchema.parse(request.body)
+
+    const updatedUser = await this.userService.verifyPhoneOtp(user.userId, phone, otp)
+
+    return reply.status(200).send({ user: updatedUser })
   }
 }

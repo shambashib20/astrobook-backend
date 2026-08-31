@@ -21,9 +21,20 @@ const envSchema = z.object({
   JWT_ACCESS_EXPIRES_IN: z.string().default('15m'),
   JWT_REFRESH_EXPIRES_IN: z.string().default('30d'),
 
-  // MSG91 — OTP SMS
-  MSG91_AUTH_KEY: z.string().optional(),
-  MSG91_TEMPLATE_ID: z.string().optional(),
+  // MSG91 — OTP SMS (commented out for now — MSG91 account/credits abhi
+  // set up nahi hai, WhatsApp hi primary OTP channel hai filhal. Wapas
+  // enable karna ho to: 1) yeh block uncomment karo, 2) sendOtpSms mein
+  // MSG91 call ka comment hataao.
+  // MSG91_AUTH_KEY: z.string().optional(),
+  // MSG91_TEMPLATE_ID: z.string().optional(),
+
+  // WhatsApp OTP — Rajesh ke self-hosted WhatsApp panel (same ETC CRM wala)
+  // ke through bheja jaata hai. Bearer-token auth; device_token batata hai
+  // kaunse connected WhatsApp number (AstroBook Store) se bhejna hai.
+  WHATSAPP_API_URL: z.string().url().default('https://whatsappapi.etcpromotion.com'),
+  WHATSAPP_API_KEY: z.string().optional(),
+  WHATSAPP_DEVICE_TOKEN: z.string().optional(),
+
   // Test/staging servers pe jahan SMS actually deliver nahi ho raha (MSG91
   // credits/DND issue), yeh true karne se /auth/send-otp response mein hi
   // OTP wapas aa jaata hai taaki QA manually enter kar sake. PRODUCTION mein
