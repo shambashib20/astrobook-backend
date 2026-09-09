@@ -6,6 +6,8 @@ import {
   SESSION_SWEEP_JOB,
   NOTIFICATION_CLEANUP_INTERVAL_MS,
   NOTIFICATION_CLEANUP_JOB,
+  SETTLEMENT_INTERVAL_MS,
+  SETTLEMENT_JOB,
   recordCronError,
   recordCronRun,
   recordCronSuccess,
@@ -15,6 +17,7 @@ import { AppointmentRepository } from './modules/consultation/repositories/appoi
 import { PushNotificationService } from './core/services/push-notification.service'
 import { NotificationsRepository } from './modules/notifications/repositories/notifications.repository'
 import { NotificationsService } from './modules/notifications/services/notifications.service'
+import { runMonthlySettlement } from './core/services/vendor-settlement-runner'
 
 async function start() {
   const app = await buildApp()
@@ -100,11 +103,39 @@ async function start() {
     }
   }, NOTIFICATION_CLEANUP_INTERVAL_MS)
 
+  // ── Astrologer payout settlement — the 8th of every month ──────────────────
+  // Ticks daily (like the sweeps above) but only actually calls Cashfree
+  // when today is the 8th — see runMonthlySettlement for the per-astrologer
+  // idempotency guard (skips anyone already settled this calendar month, so
+  // a duplicate same-day tick around a restart doesn't double-settle). This
+  // deliberately drives settlement ourselves rather than relying on
+  // Cashfree's own scheduled-cycle feature, which doesn't give exact
+  // day-of-month control.
+  const settlementInterval = setInterval(async () => {
+    recordCronRun(SETTLEMENT_JOB)
+    if (new Date().getUTCDate() !== 8) {
+      recordCronSuccess(SETTLEMENT_JOB)
+      return
+    }
+    try {
+      const { settled, failed } = await runMonthlySettlement(getDb())
+      app.log.info({ settled, failed }, 'Monthly vendor settlement run complete')
+      recordCronSuccess(SETTLEMENT_JOB)
+    } catch (err) {
+      app.log.error(err, 'Monthly vendor settlement run failed')
+      recordCronError(SETTLEMENT_JOB, err)
+      pushLog('cron', 'error', 'Monthly vendor settlement run failed', {
+        error: err instanceof Error ? err.message : String(err),
+      })
+    }
+  }, SETTLEMENT_INTERVAL_MS)
+
   // Graceful shutdown
   const shutdown = async (signal: string) => {
     app.log.info(`Received ${signal}. Shutting down gracefully...`)
     clearInterval(timeoutSweepInterval)
     clearInterval(notificationCleanupInterval)
+    clearInterval(settlementInterval)
 
     try {
       await app.close()

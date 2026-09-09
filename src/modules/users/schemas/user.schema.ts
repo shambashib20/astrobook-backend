@@ -83,39 +83,38 @@ export const UserResponseSchema = z.object({
   updatedAt:   z.date(),
 })
 
-// Razorpay Route linked-account onboarding — kicks off payout account
-// creation (POST /v2/accounts). email/phone are taken directly from this
-// request body (not the user's DB record) — Razorpay's contact details for
-// the linked account don't have to match the app-login identity 1:1.
-const RazorpayAddressSchema = z.object({
-  street1:     z.string().min(1),
-  street2:     z.string().optional(),
-  city:        z.string().min(1),
-  state:       z.string().min(1),
-  postalCode:  z.string().min(1),
-  country:     z.string().length(2).default('IN'),
-})
+// ── Razorpay Route schemas (commented out during the Cashfree migration —
+// kept, not deleted, for a quick rollback) ──
+// const RazorpayAddressSchema = z.object({
+//   street1:     z.string().min(1),
+//   street2:     z.string().optional(),
+//   city:        z.string().min(1),
+//   state:       z.string().min(1),
+//   postalCode:  z.string().min(1),
+//   country:     z.string().length(2).default('IN'),
+// })
+// export const RazorpayBusinessTypeSchema = z.enum([
+//   'individual', 'proprietorship', 'partnership', 'huf', 'private_limited',
+//   'public_limited', 'llp', 'ngo', 'trust', 'society', 'not_yet_registered', 'other',
+// ])
+// export type RazorpayBusinessType = z.infer<typeof RazorpayBusinessTypeSchema>
 
-// Razorpay's KYC requirements differ by business_type — e.g. a PAN's 4th
-// character encodes the holder type (P = individual, C = company, F = firm,
-// H = HUF, ...), so Razorpay validates the PAN format against whatever
-// business_type is declared here. Defaults to 'individual' so existing
-// callers that don't send it keep today's behavior.
-export const RazorpayBusinessTypeSchema = z.enum([
-  'individual',
-  'proprietorship',
-  'partnership',
-  'huf',
-  'private_limited',
-  'public_limited',
-  'llp',
-  'ngo',
-  'trust',
-  'society',
-  'not_yet_registered',
-  'other',
+// Cashfree Easy Split vendor account_type — maps to kyc_details.account_type
+// in the vendor create/update payload. Defaults to 'Individual' since most
+// astrologers onboard as individuals, not registered businesses.
+export const CashfreeAccountTypeSchema = z.enum([
+  'Individual',
+  'Proprietorship',
+  'Partnership',
+  'LLP',
+  'Private Limited',
+  'Public Limited',
+  'Trust',
+  'NGO',
+  'Society',
+  'Other',
 ])
-export type RazorpayBusinessType = z.infer<typeof RazorpayBusinessTypeSchema>
+export type CashfreeAccountType = z.infer<typeof CashfreeAccountTypeSchema>
 
 // Accepts "9830012345", "+919830012345", or "919830012345" — strips a
 // leading +91/91 country code (if present) before validating the bare
@@ -137,17 +136,139 @@ const indianMobileSchema = z
   })
   .pipe(z.string().regex(/^[6-9]\d{9}$/, 'Enter a valid 10-digit Indian mobile number'))
 
-export const CreateRazorpayAccountSchema = z.object({
-  email:              z.string().email(),
-  phone:              indianMobileSchema,
-  legalBusinessName: z.string().min(2).max(255),
-  contactName:        z.string().min(2).max(255).optional(),
-  businessType:       RazorpayBusinessTypeSchema.default('individual'),
-  category:           z.string().min(1),
-  subcategory:        z.string().min(1),
-  address:            RazorpayAddressSchema,
+// PAN format: 5 letters, 4 digits, 1 letter — the 4th letter encodes holder
+// type (P = individual), matching the stakeholder being this account's
+// individual owner.
+const panSchema = z
+  .string()
+  // Real PAN structure: 5 letters (4th = holder type, P for individual) +
+  // 4 digits + 1 letter = 10 chars total — {3}P[A-Za-z], not {4}P.
+  .regex(/^[A-Za-z]{3}P[A-Za-z]\d{4}[A-Za-z]$/, 'Invalid PAN')
+  .transform((v) => v.toUpperCase())
+
+// ── Razorpay Route document/account schemas (commented out — see note
+// above; kept for rollback) ──
+// export const RazorpayDocumentTypeSchema = z.enum([
+//   'business_proof_url', 'business_pan_url', 'cancelled_cheque',
+//   'shop_establishment_certificate', 'gst_certificate', 'msme_certificate',
+//   'form_12_a_url', 'form_80g_url',
+// ])
+// export const CreateRazorpayAccountSchema = z.object({
+//   email:              z.string().email(),
+//   phone:              indianMobileSchema,
+//   legalBusinessName: z.string().min(2).max(255),
+//   contactName:        z.string().min(2).max(255).optional(),
+//   businessType:       RazorpayBusinessTypeSchema.default('individual'),
+//   category:           z.string().min(1),
+//   subcategory:        z.string().min(1),
+//   address:            RazorpayAddressSchema,
+//   pan:                panSchema,
+//   documents:          z.array(z.object({ url: z.string().url(), type: RazorpayDocumentTypeSchema })).optional(),
+// })
+// export type CreateRazorpayAccountDto = z.infer<typeof CreateRazorpayAccountSchema>
+// export const SubmitBankDetailsSchema = z.object({
+//   accountNumber:   z.string().min(5).max(34),
+//   ifscCode:        z.string().regex(/^[A-Z]{4}0[A-Z0-9]{6}$/, 'Invalid IFSC code'),
+//   beneficiaryName: z.string().min(2).max(120),
+// })
+// export type SubmitBankDetailsDto = z.infer<typeof SubmitBankDetailsSchema>
+
+// Cashfree Easy Split vendor documents — client uploads to ImageKit first
+// (same convention as document1Url/document2Url on the astrologer
+// application) and hands us the URL; we fetch it and re-upload the bytes to
+// Cashfree's vendor-docs API. doc_type/doc_category are validated against
+// Cashfree's own accepted values server-side — confirm the exact list
+// against the sandbox before shipping the picker copy.
+export const CashfreeDocumentTypeSchema = z.enum([
+  'pan_card',
+  'gst_certificate',
+  'cancelled_cheque',
+  'business_proof',
+  'id_proof',
+])
+
+// Bank OR UPI, at least one required — Cashfree vendors can settle to
+// either, unlike Razorpay Route's bank-account-only settlements step.
+const CashfreeBankDetailsSchema = z.object({
+  accountNumber:   z.string().min(5).max(34),
+  ifscCode:        z.string().regex(/^[A-Z]{4}0[A-Z0-9]{6}$/, 'Invalid IFSC code'),
+  beneficiaryName: z.string().min(2).max(120),
 })
-export type CreateRazorpayAccountDto = z.infer<typeof CreateRazorpayAccountSchema>
+const CashfreeUpiDetailsSchema = z.object({
+  vpa:             z.string().min(3).max(120),
+  beneficiaryName: z.string().min(2).max(120),
+})
+
+// Cashfree's kyc_details.business_type is a FIXED enum, not free text —
+// confirmed against the sandbox (a plain string like "Astrology
+// Consulting" gets rejected with INVALID_REQUEST_TYPE, listing exactly
+// this set). "Professional Services" is the closest fit for an astrologer
+// consultation business.
+export const CashfreeBusinessCategorySchema = z.enum([
+  'Grocery',
+  'Jewellery',
+  'Miscellaneous',
+  'Web host/Domain seller',
+  'E-commerce',
+  'Online Gaming',
+  'Society/Trust/Club/Association',
+  'Mutual funds/Broking',
+  'B2B',
+  'Real Estate',
+  'Housing',
+  'Rentals',
+  'Utilities',
+  'Travel and Hospitality',
+  'Education',
+  'Food and Beverages',
+  'NBFCs/Organizations into Lending',
+  'Chit Funds',
+  'Non Profit/NGO',
+  'Financial Services',
+  'Government',
+  'Readymade',
+  'SaaS',
+  'Professional Services (Doctors, Lawyers, Architects, CAs, and other Professionals)',
+  'Open and Semi Open Wallet',
+  'Social Media and Entertainment',
+  'Pan shop',
+  'Telecom',
+  'Digital Goods',
+  'Insurance',
+  'Pharmacy',
+  'Healthcare',
+  'Retail and Shopping',
+  'Gaming',
+  'Logistics',
+])
+export type CashfreeBusinessCategory = z.infer<typeof CashfreeBusinessCategorySchema>
+
+// Single call — business/KYC + bank-or-UPI all together, matching
+// Cashfree's one-step vendor create/update (vs. Razorpay Route's
+// account → product → stakeholder → documents dance).
+export const CreateCashfreeVendorSchema = z
+  .object({
+    email:          z.string().email(),
+    phone:          indianMobileSchema,
+    contactName:    z.string().min(2).max(255),
+    accountType:    CashfreeAccountTypeSchema.default('Individual'),
+    businessCategory: CashfreeBusinessCategorySchema.default(
+      'Professional Services (Doctors, Lawyers, Architects, CAs, and other Professionals)',
+    ),
+    pan:            panSchema,
+    gst:            z.string().min(1).optional(),
+    bank:           CashfreeBankDetailsSchema.optional(),
+    upi:            CashfreeUpiDetailsSchema.optional(),
+    // Whatever documents the caller already has ready. Optional — a caller
+    // without documents yet can still complete vendor creation, and
+    // re-call this same endpoint later once documents are uploaded.
+    documents:      z.array(z.object({ url: z.string().url(), type: CashfreeDocumentTypeSchema })).optional(),
+  })
+  .refine((dto) => !!dto.bank || !!dto.upi, {
+    message: 'Provide either bank account details or a UPI ID',
+    path: ['bank'],
+  })
+export type CreateCashfreeVendorDto = z.infer<typeof CreateCashfreeVendorSchema>
 
 // Phone verification during onboarding — for Google-login users who don't
 // have a phone on their account yet. Phone-login users never hit this (their

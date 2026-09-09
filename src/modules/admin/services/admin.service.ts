@@ -2,11 +2,18 @@ import { env } from '@/config/env'
 import { getPool } from '@/core/database/client'
 import { BadRequestError, NotFoundError } from '@/core/errors'
 import { getAgoraUsageThisMonth } from '@/core/services/agora-usage.service'
+import { createRefund as cfCreateRefund } from '@/core/services/cashfree-order.service'
+import { getVendor as cfGetVendor } from '@/core/services/cashfree-vendor.service'
+import type { PaymentRepository } from '@/modules/payment/repositories/payment.repositary'
+import type { AppointmentRepository } from '@/modules/consultation/repositories/appointment.repository'
+import type { PushNotificationService } from '@/core/services/push-notification.service'
 import {
   DB_KEEPALIVE_INTERVAL_MS,
   DB_KEEPALIVE_JOB,
   SESSION_SWEEP_INTERVAL_MS,
   SESSION_SWEEP_JOB,
+  SETTLEMENT_INTERVAL_MS,
+  SETTLEMENT_JOB,
   getCronStatus,
 } from '@/core/utils/cron-heartbeat'
 import { getRecentLogs } from '@/core/utils/log-buffer'
@@ -30,7 +37,12 @@ function paginationMeta(total: number, page: number, limit: number) {
 export class AdminService {
   private imagekit: ImageKit
 
-  constructor(private readonly adminRepository: AdminRepository) {
+  constructor(
+    private readonly adminRepository: AdminRepository,
+    private readonly paymentRepository: PaymentRepository,
+    private readonly appointmentRepository: AppointmentRepository,
+    private readonly pushNotificationService: PushNotificationService,
+  ) {
     this.imagekit = new ImageKit({
       publicKey: env.IMAGEKIT_PUBLIC_KEY ?? '',
       privateKey: env.IMAGEKIT_PRIVATE_KEY ?? '',
@@ -122,6 +134,7 @@ export class AdminService {
     const jobs = [
       getCronStatus(SESSION_SWEEP_JOB, SESSION_SWEEP_INTERVAL_MS),
       getCronStatus(DB_KEEPALIVE_JOB, DB_KEEPALIVE_INTERVAL_MS),
+      getCronStatus(SETTLEMENT_JOB, SETTLEMENT_INTERVAL_MS),
     ]
     const allHealthy = jobs.every((job) => job.healthy)
 
@@ -195,6 +208,23 @@ export class AdminService {
     return this.adminRepository.updateDocuments(userId, dto)
   }
 
+  // Admin reconciliation list serves cached cashfreeVendorStatus by
+  // default (see listAstrologers) — this is the on-demand "Refresh" action
+  // for a single row, pulling live status straight from Cashfree.
+  async refreshVendorStatus(userId: string) {
+    const astrologer = await this.adminRepository.findAstrologerById(userId)
+    if (!astrologer) throw NotFoundError('Astrologer not found')
+    if (!astrologer.cashfreeVendorId) {
+      throw BadRequestError('This astrologer has not started Cashfree onboarding yet')
+    }
+
+    const vendor = await cfGetVendor(astrologer.cashfreeVendorId)
+    return this.adminRepository.updateCashfreeVendorCache(userId, {
+      cashfreeVendorStatus: vendor.status,
+      cashfreeVendorResponse: vendor,
+    })
+  }
+
   async updateCommission(userId: string, dto: UpdateCommissionDto) {
     const astrologer = await this.adminRepository.findAstrologerById(userId)
     if (!astrologer) throw NotFoundError('Astrologer not found')
@@ -211,6 +241,59 @@ export class AdminService {
     }
 
     return this.adminRepository.updateVerification(userId, dto.status, adminId, dto.rejectionReason)
+  }
+
+  // ── Refunds (admin-approved — cancelling only flags a payment as
+  // refund-eligible; this is the action that actually moves money) ──────────
+
+  async listPendingRefunds() {
+    return this.paymentRepository.findPendingRefunds()
+  }
+
+  async approveRefund(paymentId: string) {
+    const payment = await this.paymentRepository.findById(paymentId)
+    if (!payment) throw NotFoundError('Payment not found')
+    if (payment.refundStatus !== 'pending') {
+      throw BadRequestError('This payment is not awaiting a refund')
+    }
+    if (!payment.cashfreeOrderId) throw BadRequestError('No Cashfree order on this payment')
+
+    const appointment = await this.appointmentRepository.findById(payment.appointmentId)
+    if (!appointment) throw NotFoundError('Appointment not found for this payment')
+
+    // Mirror the split that was ACTUALLY used on the original order
+    // (platformCommissionPercentage/astrologerPayoutAmount snapshotted at
+    // order-creation time), not the astrologer's current commission — that
+    // may have changed since.
+    const astrologerPayoutAmount = Number(payment.astrologerPayoutAmount ?? 0)
+    const payoutInfo = await this.paymentRepository.getAstrologerPayoutInfo(appointment.astrologerId)
+    if (!payoutInfo?.cashfreeVendorId) {
+      throw BadRequestError('Astrologer has no Cashfree vendor on file — cannot compute refund split')
+    }
+
+    const refund = await cfCreateRefund(payment.cashfreeOrderId, {
+      refund_amount: Number(payment.amount),
+      refund_id: `rfnd_${paymentId.slice(0, 8)}_${Date.now().toString(36)}`,
+      refund_note: `Cancelled appointment ${appointment.id}`,
+      refund_splits:
+        astrologerPayoutAmount > 0
+          ? [{ vendor_id: payoutInfo.cashfreeVendorId, amount: astrologerPayoutAmount }]
+          : undefined,
+    })
+
+    const updated = await this.paymentRepository.recordRefund(paymentId, {
+      refundStatus: 'success',
+      refundedAmount: String(payment.amount),
+      cashfreeRefundId: refund.cf_refund_id,
+    })
+
+    this.pushNotificationService.sendToUser(appointment.userId, {
+      title: 'Refund Processed',
+      body: `₹${payment.amount} refund ho gaya tumhari cancelled booking ke liye`,
+      data: { type: 'refund_processed', appointmentId: appointment.id },
+    })
+
+    return updated
   }
 
   // ── Posts (moderation) ──────────────────────────────────────────────────────

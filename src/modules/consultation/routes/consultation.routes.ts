@@ -6,6 +6,7 @@ import { ServiceRepository } from '../repositories/service.repository'
 import { AvailabilityRepository } from '../repositories/availability.repository'
 import { AppointmentRepository } from '../repositories/appointment.repository'
 import { ServiceRequestRepository } from '../repositories/service-request.repository'
+import { PaymentRepository } from '@/modules/payment/repositories/payment.repositary'
 
 import { ConsultationService } from '../services/consultation.service'
 import { BookingService } from '../services/booking.service'
@@ -28,6 +29,7 @@ export async function consultationRoutes(app: FastifyInstance) {
   const availabilityRepo = new AvailabilityRepository(db)
   const appointmentRepo = new AppointmentRepository(db)
   const serviceRequestRepo = new ServiceRequestRepository(db)
+  const paymentRepo = new PaymentRepository(db)
 
   // ─── Services ────────────────────────────────────────────────────────────
   const agoraService = new AgoraService()
@@ -42,6 +44,7 @@ export async function consultationRoutes(app: FastifyInstance) {
     consultationService,
     agoraService,
     pushNotificationService,
+    paymentRepo,
   )
   const serviceRequestService = new ServiceRequestService(serviceRequestRepo, appointmentRepo)
 

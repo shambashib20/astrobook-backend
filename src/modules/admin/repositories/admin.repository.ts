@@ -8,7 +8,7 @@ import {
   posts,
   users,
 } from '@/core/database/schema'
-import { and, count, desc, eq, ilike, or, sql } from 'drizzle-orm'
+import { and, count, desc, eq, ilike, isNotNull, isNull, or, sql } from 'drizzle-orm'
 import type {
   ListAstrologersQueryDto,
   ListPostsQueryDto,
@@ -147,6 +147,15 @@ export class AdminRepository {
       // columns as strings to avoid precision loss, which silently turned
       // this into a string in the JSON response despite the number type here.
       commissionPercentage: sql<number | null>`(${users.meta}->>'commissionPercentage')::float8`,
+      // Cashfree Easy Split reconciliation — cached from our own DB (last
+      // onboarding call or the admin refresh action), not a live Cashfree
+      // call on every list page load. cashfreeVendorResponse carries
+      // whatever Cashfree last returned (bank/upi on file, remarks, etc.)
+      // for admins who need the detail without a separate round trip.
+      cashfreeVendorId: astrologerProfiles.cashfreeVendorId,
+      cashfreeVendorStatus: astrologerProfiles.cashfreeVendorStatus,
+      cashfreeVendorResponse: astrologerProfiles.cashfreeVendorResponse,
+      cashfreeVendorCreatedAt: astrologerProfiles.cashfreeVendorCreatedAt,
     }
   }
 
@@ -163,6 +172,11 @@ export class AdminRepository {
       if (searchCondition) conditions.push(searchCondition)
     }
     if (filters.status) conditions.push(eq(astrologerProfiles.verificationStatus, filters.status))
+    if (filters.cashfreeStatus === 'onboarded') {
+      conditions.push(isNotNull(astrologerProfiles.cashfreeVendorId))
+    } else if (filters.cashfreeStatus === 'not_onboarded') {
+      conditions.push(isNull(astrologerProfiles.cashfreeVendorId))
+    }
 
     const where = and(...conditions)
     const offset = (filters.page - 1) * filters.limit
@@ -184,6 +198,22 @@ export class AdminRepository {
     ])
 
     return { rows, total: totalRow?.value ?? 0 }
+  }
+
+  // Admin-triggered manual refresh (see AdminService.refreshVendorStatus) —
+  // caches whatever Cashfree's live GET /vendors/:id just returned, so the
+  // paginated list above can keep reading from our own DB instead of
+  // calling Cashfree on every page load.
+  async updateCashfreeVendorCache(
+    userId: string,
+    data: { cashfreeVendorStatus: string; cashfreeVendorResponse: unknown },
+  ) {
+    const [profile] = await this.db
+      .update(astrologerProfiles)
+      .set({ ...data, updatedAt: sql`now()` })
+      .where(eq(astrologerProfiles.userId, userId))
+      .returning()
+    return profile ?? null
   }
 
   async findAstrologerById(userId: string) {
@@ -241,14 +271,14 @@ export class AdminRepository {
             role: 'astrologer',
             isAstrologer: true,
             updatedAt: sql`now()`,
-            // Naye astrologer ko default commissionPercentage:0 milta hai
-            // meta mein — sirf tab set karte hain jab already nahi hai
-            // (existing meta keys preserve rehte hain, aur re-approval pe
-            // admin-set value overwrite nahi hoti).
+            // Naye astrologer ko default commissionPercentage:30 milta hai
+            // meta mein (Astrobook's platform default) — sirf tab set karte
+            // hain jab already nahi hai (existing meta keys preserve rehte
+            // hain, aur re-approval pe admin-set value overwrite nahi hoti).
             meta: sql`CASE
               WHEN COALESCE(${users.meta}, '{}'::jsonb) ? 'commissionPercentage'
                 THEN COALESCE(${users.meta}, '{}'::jsonb)
-              ELSE COALESCE(${users.meta}, '{}'::jsonb) || '{"commissionPercentage": 0}'::jsonb
+              ELSE COALESCE(${users.meta}, '{}'::jsonb) || '{"commissionPercentage": 30}'::jsonb
             END`,
           })
           .where(eq(users.id, userId))

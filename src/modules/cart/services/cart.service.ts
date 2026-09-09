@@ -1,7 +1,14 @@
-import Razorpay from 'razorpay'
-import crypto from 'crypto'
-import { env } from '@/config/env'
+// Razorpay combined-order checkout — commented out during the Cashfree
+// migration (kept, not deleted, for a quick rollback):
+// import Razorpay from 'razorpay'
+// import crypto from 'crypto'
+// const razorpay = new Razorpay({ key_id: env.RAZORPAY_KEY_ID, key_secret: env.RAZORPAY_KEY_SECRET })
+
 import { BadRequestError, NotFoundError } from '@/core/errors'
+import {
+  createOrder as cfCreateOrder,
+  getOrder as cfGetOrder,
+} from '@/core/services/cashfree-order.service'
 import type { CartRepository } from '../repositories/cart.repository'
 import type { ServiceRepository } from '@/modules/consultation/repositories/service.repository'
 import type { PaymentRepository } from '@/modules/payment/repositories/payment.repositary'
@@ -10,11 +17,6 @@ import type { BookingService } from '@/modules/consultation/services/booking.ser
 import type { AgoraService } from '@/modules/consultation/services/agora.service'
 import type { PushNotificationService } from '@/core/services/push-notification.service'
 import type { AddCartItemDto, CartCheckoutVerifyDto } from '../schemas/cart.schema'
-
-const razorpay = new Razorpay({
-  key_id: env.RAZORPAY_KEY_ID,
-  key_secret: env.RAZORPAY_KEY_SECRET,
-})
 
 export class CartService {
   constructor(
@@ -108,14 +110,19 @@ export class CartService {
     await this.cartRepository.delete(id, userId)
   }
 
-  // ── Checkout: Step 1 — Create combined Razorpay order ──────────────────────
+  // ── Checkout: Step 1 — Create combined Cashfree order (multi-vendor split) ──
   //
   // Har selected cart item ke liye ek 'pending' appointment banate hain
   // (BookingService.initiateBooking reuse karke — same availability/conflict
   // validation jo single-booking flow mein hoti hai). Fir sabke total price
-  // ka EK combined Razorpay order banate hain. Har appointment ke liye ek
-  // `payments` row banti hai, sabme same razorpayOrderId — taaki verify step
+  // ka EK combined Cashfree order banate hain. Har appointment ke liye ek
+  // `payments` row banti hai, sabme same cashfreeOrderId — taaki verify step
   // par sab ek saath confirm ho saken.
+  //
+  // order_splits percentages Cashfree mein TOTAL order amount ke against
+  // hote hain, per-astrologer item amount ke against nahi — isliye har
+  // astrologer ka absolute payout (unka item amount * unka split %) wapas
+  // total-order-relative percentage mein convert karna padta hai.
 
   async createCheckoutOrder(userId: string, cartItemIds: string[]) {
     const items = await this.cartRepository.findByIdsForUser(cartItemIds, userId)
@@ -152,23 +159,76 @@ export class CartService {
     const totalAmount = appointments.reduce((sum, a) => sum + a.price, 0)
     if (totalAmount <= 0) throw BadRequestError('Invalid total amount')
 
-    const order = await razorpay.orders.create({
-      amount: Math.round(totalAmount * 100),
-      currency: 'INR',
-      receipt: `cart_${userId.slice(0, 8)}_${Date.now()}`,
-      notes: { userId, itemCount: String(appointments.length) },
+    // Each astrologer's live commissionPercentage + Cashfree vendor id —
+    // one lookup per distinct astrologer in the cart, read fresh (not
+    // cached) so an admin's commission change applies to the next order.
+    const astrologerIds = Array.from(new Set(items.map((i) => i.astrologerId)))
+    const payoutInfoByAstrologer = new Map(
+      await Promise.all(
+        astrologerIds.map(async (id) => {
+          const info = await this.paymentRepository.getAstrologerPayoutInfo(id)
+          if (!info?.cashfreeVendorId) {
+            throw BadRequestError(
+              'One of the selected astrologers has not completed payout onboarding yet',
+            )
+          }
+          return [id, info] as const
+        }),
+      ),
+    )
+
+    // Convert each astrologer's absolute payout (their item's price * their
+    // split %) into a percentage of the TOTAL order — that's the unit
+    // order_splits actually wants.
+    const splitByVendor = new Map<string, { percentage: number; payoutAmount: number }>()
+    const paymentSnapshots = appointments.map(({ appointment, price }) => {
+      const item = items.find((i) => i.astrologerId === appointment.astrologerId)!
+      const payoutInfo = payoutInfoByAstrologer.get(item.astrologerId)!
+      const vendorId = payoutInfo.cashfreeVendorId! // checked non-null above, per astrologer
+      const commissionPercentage = Number(payoutInfo.commissionPercentage)
+      const astrologerPayoutAmount = Math.round(price * (100 - commissionPercentage)) / 100
+      const existing = splitByVendor.get(vendorId) ?? { percentage: 0, payoutAmount: 0 }
+      splitByVendor.set(vendorId, {
+        percentage: existing.percentage + (astrologerPayoutAmount / totalAmount) * 100,
+        payoutAmount: existing.payoutAmount + astrologerPayoutAmount,
+      })
+      return { appointment, price, commissionPercentage, astrologerPayoutAmount }
     })
 
-    // Har appointment ke liye ek payment row — sab same razorpayOrderId share karte hain.
+    const customer = await this.paymentRepository.getCustomerDetails(userId)
+    if (!customer) throw NotFoundError('User not found')
+
+    const orderId = `cart_${userId.slice(0, 8)}_${Date.now().toString(36)}`
+
+    const order = await cfCreateOrder({
+      order_id: orderId,
+      order_amount: totalAmount,
+      order_currency: 'INR',
+      customer_details: {
+        customer_id: userId,
+        customer_email: customer.email ?? 'no-reply@astrobook.app',
+        customer_phone: customer.phone ?? '9999999999',
+        customer_name: customer.name ?? 'Astrobook User',
+      },
+      order_note: `Cart checkout — ${appointments.length} item(s)`,
+      order_splits: Array.from(splitByVendor.entries()).map(([vendor_id, { percentage }]) => ({
+        vendor_id,
+        percentage,
+      })),
+    })
+
+    // Har appointment ke liye ek payment row — sab same cashfreeOrderId share karte hain.
     // Independent inserts, no shared state — run concurrently instead of
     // one DB round trip at a time.
     await Promise.all(
-      appointments.map(({ appointment, price }) =>
+      paymentSnapshots.map(({ appointment, price, commissionPercentage, astrologerPayoutAmount }) =>
         this.paymentRepository.create({
           appointmentId: appointment.id,
-          razorpayOrderId: order.id,
+          cashfreeOrderId: order.order_id,
           amount: String(price),
           status: 'pending',
+          platformCommissionPercentage: String(commissionPercentage),
+          astrologerPayoutAmount: String(astrologerPayoutAmount),
         }),
       ),
     )
@@ -180,7 +240,8 @@ export class CartService {
     )
 
     return {
-      orderId: order.id,
+      orderId: order.order_id,
+      paymentSessionId: order.payment_session_id,
       amount: totalAmount,
       currency: 'INR',
       appointmentIds: appointments.map((a) => a.appointment.id),
@@ -188,36 +249,36 @@ export class CartService {
   }
 
   // ── Checkout: Step 2 — Verify combined payment ──────────────────────────────
+  // Same webhook-first model as the single-appointment flow (see
+  // payment.service.ts): the Cashfree webhook is what actually flips these
+  // payment rows to 'success' (PaymentService.finalizeOrderPayments handles
+  // any order id, single or multi-item). This just re-reads status, falling
+  // back to a live Cashfree check if the webhook hasn't landed yet.
 
   async verifyCheckout(userId: string, dto: CartCheckoutVerifyDto) {
-    const { razorpayOrderId, razorpayPaymentId, razorpaySignature } = dto
+    const { orderId } = dto
 
-    const expectedSignature = crypto
-      .createHmac('sha256', env.RAZORPAY_KEY_SECRET)
-      .update(`${razorpayOrderId}|${razorpayPaymentId}`)
-      .digest('hex')
+    let paymentRows = await this.paymentRepository.findAllByOrderId(orderId)
+    if (paymentRows.length === 0) throw NotFoundError('No payment found for this order')
 
-    if (expectedSignature !== razorpaySignature) {
-      await this.paymentRepository.updateByOrderId(razorpayOrderId, {
-        status: 'failed',
-        razorpayPaymentId,
-        razorpaySignature,
-      })
-      this.pushNotificationService.sendToUser(userId, {
-        title: 'Payment Nahi Hua',
-        body: 'Tumhara payment complete nahi ho paya',
-        data: { type: 'payment_failed' },
-      })
-      throw BadRequestError('Payment verification failed — invalid signature')
+    const stillPending = paymentRows.some((row) => row.status !== 'success')
+    if (stillPending) {
+      const order = await cfGetOrder(orderId)
+      if (order.order_status === 'PAID') {
+        await this.paymentRepository.updateByOrderId(orderId, { status: 'success' })
+      } else if (order.order_status === 'EXPIRED' || order.order_status === 'TERMINATED') {
+        await this.paymentRepository.updateByOrderId(orderId, { status: 'failed' })
+        this.pushNotificationService.sendToUser(userId, {
+          title: 'Payment Nahi Hua',
+          body: 'Tumhara payment complete nahi ho paya',
+          data: { type: 'payment_failed' },
+        })
+        throw BadRequestError('Payment did not complete')
+      } else {
+        return { message: 'Payment still processing', appointments: [] }
+      }
+      paymentRows = await this.paymentRepository.findAllByOrderId(orderId)
     }
-
-    await this.paymentRepository.updateByOrderId(razorpayOrderId, {
-      status: 'success',
-      razorpayPaymentId,
-      razorpaySignature,
-    })
-
-    const paymentRows = await this.paymentRepository.findAllByOrderId(razorpayOrderId)
 
     // Each row is an independent appointment confirmation — no shared
     // state between iterations, so fan them out instead of one DB round

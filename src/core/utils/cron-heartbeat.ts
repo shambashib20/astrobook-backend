@@ -20,6 +20,14 @@ export const DB_KEEPALIVE_INTERVAL_MS = 4 * 60_000
 export const NOTIFICATION_CLEANUP_JOB = 'notification-cleanup'
 export const NOTIFICATION_CLEANUP_INTERVAL_MS = 6 * 60 * 60 * 1000
 
+// Astrologer payout settlement — ticks daily but only actually calls
+// Cashfree on the 8th of the month (see server.ts). Daily is the tick rate
+// here, not the business cadence — getCronStatus's "2x interval" staleness
+// check is against THIS tick, so a daily check-in still shows healthy on
+// the 27 days it does nothing.
+export const SETTLEMENT_JOB = 'vendor-settlement'
+export const SETTLEMENT_INTERVAL_MS = 24 * 60 * 60 * 1000
+
 type JobState = {
   lastRunAt: Date | null
   lastSuccessAt: Date | null

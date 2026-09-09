@@ -3,6 +3,7 @@ import type { AppointmentRepository } from '../repositories/appointment.reposito
 import type { ConsultationService } from './consultation.service'
 import type { AgoraService } from './agora.service'
 import type { PushNotificationService } from '@/core/services/push-notification.service'
+import type { PaymentRepository } from '@/modules/payment/repositories/payment.repositary'
 import type { CreateBookingDto } from '../schemas/consultation.schema'
 import type { Appointment } from '@/core/database/schema'
 
@@ -54,6 +55,7 @@ export class BookingService {
     private readonly consultationService: ConsultationService,
     private readonly agoraService: AgoraService,
     private readonly pushNotificationService: PushNotificationService,
+    private readonly paymentRepository: PaymentRepository,
   ) {}
 
   // ── Initiate Booking (pending — payment abhi baki) ────────────────────────
@@ -287,6 +289,11 @@ export class BookingService {
     if (appointment.status === 'ongoing') throw BadRequestError('Cannot cancel an ongoing session')
 
     const updated = await this.appointmentRepository.update(appointmentId, { status: 'cancelled' })
+
+    // Refunds are admin-approved, never automatic — this just flags the
+    // payment (if one succeeded) as awaiting an admin's refund decision.
+    // No-op if there's no successful payment on this appointment.
+    await this.paymentRepository.markRefundPending(appointmentId)
 
     // Jo party cancel nahi kar rahi, usko batao — requester ko khud pata hai
     const otherPartyId =

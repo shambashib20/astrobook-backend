@@ -4,8 +4,9 @@
  * default se PEHLE approve ho chuke the) ke `meta` object mein
  * commissionPercentage nahi hai. Yeh script sirf un astrologers ko update
  * karta hai jinke meta mein yeh key missing hai — existing meta keys
- * (agar koi hain) preserve rehte hain, sirf commissionPercentage:0 merge
- * hota hai. Idempotent hai — dobara run karne se kuch nahi badlega.
+ * (agar koi hain) preserve rehte hain, sirf commissionPercentage:30
+ * (Astrobook's platform default) merge hota hai. Idempotent hai — dobara
+ * run karne se kuch nahi badlega.
  *
  * Run karne ka tareeka (server folder ke andar se):
  *   npx tsx src/scripts/backfill-commission-percentage.ts
@@ -20,7 +21,7 @@ async function main() {
   const result = await db
     .update(users)
     .set({
-      meta: sql`COALESCE(${users.meta}, '{}'::jsonb) || '{"commissionPercentage": 0}'::jsonb`,
+      meta: sql`COALESCE(${users.meta}, '{}'::jsonb) || '{"commissionPercentage": 30}'::jsonb`,
       updatedAt: sql`now()`,
     })
     .where(
@@ -31,7 +32,7 @@ async function main() {
     )
     .returning({ id: users.id, name: users.name })
 
-  console.log(`Backfilled commissionPercentage=0 for ${result.length} astrologer(s).`)
+  console.log(`Backfilled commissionPercentage=30 for ${result.length} astrologer(s).`)
   for (const row of result) {
     console.log(`  -> ${row.name ?? row.id}`)
   }

@@ -2,7 +2,9 @@ import { env } from '@/config/env'
 import type { PushNotificationService } from '@/core/services/push-notification.service'
 import type { FastifyReply, FastifyRequest } from 'fastify'
 import {
-  CreateRazorpayAccountSchema,
+  // CreateRazorpayAccountSchema, SubmitBankDetailsSchema — commented out
+  // during the Cashfree migration, kept for rollback (see user.schema.ts).
+  CreateCashfreeVendorSchema,
   OnboardingSchema,
   RegisterPushTokenSchema,
   RequestAstrologerUpgradeSchema,
@@ -96,27 +98,29 @@ export class UserController {
 
   /**
    * POST /users/me/bank-onboarding
-   * Bank onboarding — creates a Razorpay Route linked account (payouts) for
-   * the logged-in astrologer.
+   * Bank onboarding — creates/updates a Cashfree Easy Split vendor
+   * (bank-or-UPI + KYC in one call) for the logged-in astrologer. Replaces
+   * the old 3-step Razorpay Route wizard (account → product → bank-details)
+   * with a single step; documents remain an optional follow-up call.
    */
   startBankOnboarding = async (request: FastifyRequest, reply: FastifyReply) => {
     const user = request.user as { userId: string }
-    const dto = CreateRazorpayAccountSchema.parse(request.body)
+    const dto = CreateCashfreeVendorSchema.parse(request.body)
 
     const account = await this.userService.startBankOnboarding(user.userId, dto)
 
     return reply.status(201).send({
       message: account.alreadyExists
         ? 'Bank onboarding already completed for this astrologer'
-        : 'Bank onboarding completed — Razorpay account created',
+        : 'Bank onboarding completed — Cashfree vendor created',
       account,
     })
   }
 
   /**
    * GET /users/me/bank-onboarding
-   * Live Razorpay account details for the logged-in astrologer's saved
-   * account id — status, KYC/business info, etc., straight from Razorpay.
+   * Live Cashfree vendor details for the logged-in astrologer's saved
+   * vendor id — status, KYC/business info, etc., straight from Cashfree.
    */
   getBankOnboardingStatus = async (request: FastifyRequest, reply: FastifyReply) => {
     const user = request.user as { userId: string }
@@ -124,6 +128,12 @@ export class UserController {
 
     return reply.status(200).send({ account })
   }
+
+  // submitBankDetails (POST /users/me/bank-onboarding/bank-details) —
+  // commented out: Cashfree collects bank/UPI details in the same call as
+  // startBankOnboarding above, so this separate step no longer exists.
+  // Kept here, not deleted, for rollback:
+  // submitBankDetails = async (request: FastifyRequest, reply: FastifyReply) => { ... }
 
   /**
    * POST /users/me/phone/send-otp

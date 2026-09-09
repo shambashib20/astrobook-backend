@@ -94,13 +94,13 @@ export class UserRepository {
     return profile ?? null
   }
 
-  // ── Razorpay Route account onboarding ───────────────────────────────────────
+  // ── Cashfree Easy Split vendor onboarding ───────────────────────────────────
 
-  // Razorpay's reference_id needs a stable id that already exists in our DB
-  // *before* the account call goes out — the astrologerProfiles row's own
-  // id, so the linked account ties back to exactly one profile. If the user
-  // hasn't submitted an astrologer application yet, create a bare pending
-  // row here rather than failing the onboarding step on that.
+  // Cashfree's vendor_id is caller-chosen and deterministic per astrologer
+  // (see generateCashfreeVendorId), so — unlike Razorpay's reference_id —
+  // there's no need to mint anything before the vendor call goes out. If the
+  // user hasn't submitted an astrologer application yet, create a bare
+  // pending row here rather than failing the onboarding step on that.
   async ensureAstrologerProfile(userId: string) {
     const [profile] = await this.db
       .insert(astrologerProfiles)
@@ -113,13 +113,31 @@ export class UserRepository {
     return profile!
   }
 
-  async saveRazorpayAccount(
+  async updateEmail(userId: string, email: string) {
+    const [user] = await this.db
+      .update(users)
+      .set({ email, updatedAt: sql`now()` })
+      .where(eq(users.id, userId))
+      .returning()
+    return user ?? null
+  }
+
+  // ── Razorpay Route persistence (commented out during the Cashfree
+  // migration — kept, not deleted, for a quick rollback) ──
+  // async saveRazorpayAccount(userId: string, data: {...}) { ... }
+  // async saveRazorpayProduct(userId: string, data: {...}) { ... }
+  // async saveRazorpayStakeholder(userId: string, data: {...}) { ... }
+  // async saveRazorpayDocuments(userId: string, uploadedByType: Record<string, unknown>) { ... }
+
+  // Single save — Cashfree's vendor create/update call returns everything
+  // (bank/UPI + KYC + status) in one response, so there's only one method
+  // here instead of Razorpay Route's four staged saves.
+  async saveCashfreeVendor(
     userId: string,
     data: {
-      razorpayAccountId: string
-      razorpayAccountStatus: string
-      razorpayReferenceId: string
-      razorpayAccountResponse: unknown
+      cashfreeVendorId: string
+      cashfreeVendorStatus: string
+      cashfreeVendorResponse: unknown
     },
   ) {
     const [profile] = await this.db
@@ -128,13 +146,12 @@ export class UserRepository {
         userId,
         verificationStatus: 'pending',
         ...data,
-        razorpayAccountCreatedAt: sql`now()`,
+        cashfreeVendorCreatedAt: sql`now()`,
       })
       .onConflictDoUpdate({
         target: astrologerProfiles.userId,
         set: {
           ...data,
-          razorpayAccountCreatedAt: sql`now()`,
           updatedAt: sql`now()`,
         },
       })

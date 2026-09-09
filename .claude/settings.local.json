@@ -41,7 +41,18 @@
       "WebFetch(domain:docs.agora.io)",
       "WebFetch(domain:docs-legacy.agora.io)",
       "Bash(curl -s http://localhost:9000/docs/json)",
-      "Bash(node -e ' *)"
+      "Bash(node -e ' *)",
+      "Bash(npm run *)",
+      "Bash(kill %1)",
+      "Bash(jobs)",
+      "Bash(grep -v \"SECURITY WARNING\\\\|next major\\\\|current behavior\\\\|libpq compat\\\\|postgresql.org\\\\|trace-warnings\\\\|^$\")",
+      "WebFetch(domain:razorpay.com)",
+      "Bash(node -e \"console.log\\(require\\('axios/package.json'\\).version\\)\")",
+      "WebFetch(domain:www.cashfree.com)",
+      "mcp__ide__getDiagnostics",
+      "Bash(npx vitest *)",
+      "Bash(wc -l /tmp_ts_out.txt)",
+      "Bash(cat /tmp_ts_out.txt)"
     ]
   },
   "enabledMcpjsonServers": [
