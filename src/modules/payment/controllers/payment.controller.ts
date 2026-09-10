@@ -54,11 +54,18 @@ export class PaymentController {
       data?: { order?: { order_id?: string }; payment?: { cf_payment_id?: string; payment_status?: string } }
     }
 
+    // cf_payment_id is a 19-digit id — beyond Number.MAX_SAFE_INTEGER. If
+    // Cashfree sends it as an unquoted JSON number (it does), the standard
+    // JSON.parse used by our raw-body content-type parser already rounds it
+    // to the nearest representable double before this code ever runs — e.g.
+    // 1451711055512987648 silently becomes 1451711055512987600. Pull it
+    // straight out of the raw string instead, so it's never coerced through
+    // a JS number.
+    const cfPaymentIdMatch = rawBody.match(/"cf_payment_id"\s*:\s*"?(\d+)"?/)
+    const cfPaymentId = cfPaymentIdMatch?.[1] ?? String(payload?.data?.payment?.cf_payment_id ?? '')
+
     if (payload?.data?.payment?.payment_status === 'SUCCESS' && payload.data.order?.order_id) {
-      await this.paymentService.finalizeOrderPayments(
-        payload.data.order.order_id,
-        String(payload.data.payment.cf_payment_id ?? ''),
-      )
+      await this.paymentService.finalizeOrderPayments(payload.data.order.order_id, cfPaymentId)
     }
 
     return reply.status(200).send({ received: true })

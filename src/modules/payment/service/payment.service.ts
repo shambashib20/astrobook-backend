@@ -4,6 +4,7 @@
 // import crypto from 'crypto'
 // const razorpay = new Razorpay({ key_id: env.RAZORPAY_KEY_ID, key_secret: env.RAZORPAY_KEY_SECRET })
 
+import { env } from '@/config/env'
 import { BadRequestError, NotFoundError, ForbiddenError } from '@/core/errors'
 import { AgoraService } from '@/modules/consultation/services/agora.service'
 import { createOrder as cfCreateOrder, getOrder as cfGetOrder } from '@/core/services/cashfree-order.service'
@@ -82,6 +83,19 @@ export class PaymentService {
       },
       order_note: `Appointment ${appointmentId}`,
       order_splits: [{ vendor_id: payoutInfo.cashfreeVendorId, percentage: astrologerSplitPercentage }],
+      order_meta: {
+        // NOTE: payment routes are registered under /api/${env.API_VERSION}
+        // (see app.ts) — must match exactly or Cashfree calls a 404 and
+        // both the webhook and the OTP/3DS return redirect silently fail.
+        notify_url: `${env.BACKEND_PUBLIC_URL}/api/${env.API_VERSION}/payments/webhooks/cashfree`,
+        // {order_id} is a Cashfree-recognised placeholder — it substitutes
+        // the real order id when redirecting the browser back here after
+        // the issuing bank's OTP/3DS page finishes. Required for the
+        // hosted card checkout flow (doWebPayment) — without it, the OTP
+        // step has nowhere to redirect to and the SDK reports a generic
+        // "Payment error" even though the card details were valid.
+        return_url: `${env.BACKEND_PUBLIC_URL}/api/${env.API_VERSION}/payments/cashfree-return?order_id={order_id}`,
+      },
     })
 
     // Save payment record as pending — the split actually used is snapshotted

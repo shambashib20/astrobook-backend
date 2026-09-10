@@ -91,6 +91,12 @@ const envSchema = z.object({
   // kept server-driven (not hardcoded client-side) so switching sandbox/prod
   // doesn't need an app release.
   CASHFREE_ENVIRONMENT: z.enum(['SANDBOX', 'PRODUCTION']).default('SANDBOX'),
+  // Publicly reachable base URL for THIS backend — Cashfree calls back to
+  // `${BACKEND_PUBLIC_URL}/payments/webhooks/cashfree` (order_meta.notify_url)
+  // once a payment resolves. Cashfree's servers can't reach localhost/LAN
+  // IPs, so local testing needs a tunnel (e.g. ngrok) with its https URL set
+  // here.
+  BACKEND_PUBLIC_URL: z.string().url('BACKEND_PUBLIC_URL is required'),
 })
 
 const parsed = envSchema.safeParse(process.env)

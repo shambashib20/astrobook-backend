@@ -4,6 +4,7 @@
 // import crypto from 'crypto'
 // const razorpay = new Razorpay({ key_id: env.RAZORPAY_KEY_ID, key_secret: env.RAZORPAY_KEY_SECRET })
 
+import { env } from '@/config/env'
 import { BadRequestError, NotFoundError } from '@/core/errors'
 import {
   createOrder as cfCreateOrder,
@@ -215,6 +216,14 @@ export class CartService {
         vendor_id,
         percentage,
       })),
+      order_meta: {
+        // Must match the /api/${env.API_VERSION} prefix payment routes are
+        // registered under (see app.ts) — see payment.service.ts::createOrder
+        // for why a mismatch here silently breaks both the webhook and the
+        // OTP/3DS return redirect.
+        notify_url: `${env.BACKEND_PUBLIC_URL}/api/${env.API_VERSION}/payments/webhooks/cashfree`,
+        return_url: `${env.BACKEND_PUBLIC_URL}/api/${env.API_VERSION}/payments/cashfree-return?order_id={order_id}`,
+      },
     })
 
     // Har appointment ke liye ek payment row — sab same cashfreeOrderId share karte hain.

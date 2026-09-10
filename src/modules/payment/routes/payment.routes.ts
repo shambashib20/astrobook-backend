@@ -96,6 +96,20 @@ export async function paymentRoutes(app: FastifyInstance) {
     paymentController.getMyTransactions,
   )
 
+  // GET /payments/cashfree-return — order_meta.return_url target. The
+  // native SDK (doWebPayment) intercepts this navigation client-side to
+  // detect that the bank's OTP/3DS page finished and fires onVerify/onError
+  // itself, so this handler rarely actually renders — but it needs to
+  // resolve to *something* (not a 404) for the brief moment before the SDK
+  // intercepts, and as a fallback if interception fails for any reason.
+  app.get(
+    '/payments/cashfree-return',
+    { schema: { tags: ['Payment'], summary: 'Cashfree hosted-checkout return landing page' } },
+    async (_request, reply) => {
+      return reply.type('text/html').send('<html><body>Processing payment…</body></html>')
+    },
+  )
+
   // POST /payments/webhooks/cashfree — Cashfree calls this, not a logged-in
   // user, so: no `authenticate` preHandler, an explicit rate-limit
   // exemption (the global limiter is keyed for per-user traffic and would
