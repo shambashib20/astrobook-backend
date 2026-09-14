@@ -22,6 +22,26 @@ export class AdminController {
     return reply.status(200).send(stats)
   }
 
+  // POST /admin/astrologers/:id/cashfree-refresh
+  refreshVendorStatus = async (request: FastifyRequest, reply: FastifyReply) => {
+    const { id } = request.params as { id: string }
+    const astrologer = await this.adminService.refreshVendorStatus(id)
+    return reply.status(200).send({ message: 'Vendor status refreshed', astrologer })
+  }
+
+  // GET /admin/payments/refunds-pending
+  listPendingRefunds = async (_request: FastifyRequest, reply: FastifyReply) => {
+    const refunds = await this.adminService.listPendingRefunds()
+    return reply.status(200).send({ refunds })
+  }
+
+  // POST /admin/payments/:paymentId/refund
+  approveRefund = async (request: FastifyRequest, reply: FastifyReply) => {
+    const { paymentId } = request.params as { paymentId: string }
+    const payment = await this.adminService.approveRefund(paymentId)
+    return reply.status(200).send({ message: 'Refund processed', payment })
+  }
+
   // GET /admin/health
   // Always 200 — the panel reads `status`/`checks[*].status` from the body
   // to render up/degraded, rather than branching on the HTTP status code

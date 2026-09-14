@@ -1,18 +1,33 @@
 import { BadRequestError, ConflictError, NotFoundError, RateLimitError } from '@/core/errors'
 import { sendOtpSms } from '@/modules/auth'
+// Razorpay Route onboarding — commented out during the Cashfree migration,
+// kept for a quick rollback (see razorpay-account.service.ts).
+// import {
+//   createRazorpayAccount, createStakeholder, generateRazorpayReferenceId,
+//   getRazorpayAccount, requestRouteProduct, updateRouteProductSettlements,
+//   uploadAccountDocument,
+// } from '@/core/services/razorpay-account.service'
 import {
-  createRazorpayAccount,
-  generateRazorpayReferenceId,
-  getRazorpayAccount,
-} from '@/core/services/razorpay-account.service'
+  createVendor,
+  generateCashfreeVendorId,
+  getVendor,
+  updateVendor,
+  uploadVendorDocument,
+} from '@/core/services/cashfree-vendor.service'
 import bcrypt from 'bcrypt'
 import type { UserRepository } from '../repositories/user.repository'
 import type {
-  CreateRazorpayAccountDto,
+  CreateCashfreeVendorDto,
   OnboardingDto,
   RequestAstrologerUpgradeDto,
   UpdateProfileDto,
 } from '../schemas/user.schema'
+
+// Default settlement cycle assigned to every new vendor — astrologers are
+// actually settled by our own monthly cron (8th of every month, see
+// server.ts), not by Cashfree's own cycle, so this just needs to be a valid
+// schedule_option id for the account; it isn't what drives payout timing.
+const DEFAULT_SCHEDULE_OPTION = 1
 
 export class UserService {
   constructor(private readonly userRepository: UserRepository) {}
@@ -45,8 +60,10 @@ export class UserService {
 
     return {
       ...user,
-      razorpayAccountId: astrologerProfile?.razorpayAccountId ?? null,
-      razorpayAccountStatus: astrologerProfile?.razorpayAccountStatus ?? null,
+      // razorpayAccountId/Status/ProductId/ProductStatus — commented out
+      // during the Cashfree migration (kept for rollback).
+      cashfreeVendorId: astrologerProfile?.cashfreeVendorId ?? null,
+      cashfreeVendorStatus: astrologerProfile?.cashfreeVendorStatus ?? null,
     }
   }
 
@@ -98,82 +115,114 @@ export class UserService {
     return this.userRepository.submitAstrologerApplication(userId, dto)
   }
 
-  // ── Bank onboarding (Razorpay Route linked account) ─────────────────────────
-  // Astrologer ke payout account ka pehla step — POST /v2/accounts.
-  // email/phone ab is request body se hi aate hain (dto.email/dto.phone) —
-  // Razorpay ke liye contact details app-login identity se match karna
-  // zaroori nahi hai.
+  // ── Bank onboarding (Cashfree Easy Split vendor) ────────────────────────────
+  // Razorpay Route's version of this (account → product → stakeholder →
+  // documents, 4 staged calls) is commented out above. Cashfree collapses
+  // all of that into one create/update-vendor call carrying bank-or-UPI +
+  // KYC together — so this method is now just: ensure a vendor id exists,
+  // create-or-update it, optionally attach documents.
 
-  async startBankOnboarding(userId: string, dto: CreateRazorpayAccountDto) {
+  async startBankOnboarding(userId: string, dto: CreateCashfreeVendorDto) {
     const user = await this.userRepository.findById(userId)
     if (!user) throw NotFoundError('User not found')
 
-    // Profile row must exist before we call Razorpay, so a fresh
-    // reference_id only ever gets minted (and persisted) once per profile.
-    const profile = await this.userRepository.ensureAstrologerProfile(userId)
-
-    // Already has a linked account — don't create a duplicate on Razorpay's
-    // side, just hand back what we already have. This (not the reference_id
-    // itself) is what makes repeated calls idempotent.
-    if (profile.razorpayAccountId) {
-      return {
-        id: profile.razorpayAccountId,
-        status: profile.razorpayAccountStatus,
-        referenceId: profile.razorpayReferenceId,
-        alreadyExists: true,
+    // Email typed into the bank-onboarding form doubles as the user's
+    // profile email — keep users.email in sync whenever it differs.
+    if (dto.email !== user.email) {
+      try {
+        await this.userRepository.updateEmail(userId, dto.email)
+      } catch (err) {
+        if (err instanceof Error && 'code' in err && err.code === '23505') {
+          throw ConflictError('This email is already in use by another account')
+        }
+        throw err
       }
     }
 
-    const account = await createRazorpayAccount({
+    const profile = await this.userRepository.ensureAstrologerProfile(userId)
+
+    // vendor_id is deterministic (ast_<astrologerId>), so "does this vendor
+    // already exist" is just "do we already have a saved id" — no separate
+    // reference-id bookkeeping needed the way Razorpay Route required.
+    const alreadyExists = !!profile.cashfreeVendorId
+    const vendorId = profile.cashfreeVendorId ?? generateCashfreeVendorId(userId)
+
+    // Shared across create and update — everything EXCEPT status, which is
+    // deliberately not part of this object (see below). Cashfree's own
+    // Update Vendor reference example never sends status: "ACTIVE" — it
+    // only includes status when actually changing it (their sample shows
+    // "DELETED"). Sending status on every PATCH, even when the vendor has
+    // no valid transition back to its current state, is exactly what
+    // produces "Invalid state. Allowed states are: []" — confirmed against
+    // the sandbox.
+    const sharedFields = {
+      name: dto.contactName ?? user.name ?? dto.email,
       email: dto.email,
       phone: dto.phone,
-      legal_business_name: dto.legalBusinessName,
-      business_type: dto.businessType,
-      contact_name: dto.contactName ?? user.name ?? dto.legalBusinessName,
-      reference_id: generateRazorpayReferenceId(),
-      profile: {
-        category: dto.category,
-        subcategory: dto.subcategory,
-        addresses: {
-          registered: {
-            street1: dto.address.street1,
-            street2: dto.address.street2,
-            city: dto.address.city,
-            state: dto.address.state,
-            postal_code: dto.address.postalCode,
-            country: dto.address.country,
-          },
-        },
+      verify_account: true,
+      dashboard_access: true,
+      schedule_option: DEFAULT_SCHEDULE_OPTION,
+      bank: dto.bank
+        ? {
+            account_number: dto.bank.accountNumber,
+            account_holder: dto.bank.beneficiaryName,
+            ifsc: dto.bank.ifscCode,
+          }
+        : undefined,
+      upi: dto.upi
+        ? { vpa: dto.upi.vpa, account_holder: dto.upi.beneficiaryName }
+        : undefined,
+      kyc_details: {
+        account_type: dto.accountType,
+        business_type: dto.businessCategory,
+        pan: dto.pan,
+        gst: dto.gst,
       },
+    }
+
+    const vendor = alreadyExists
+      ? await updateVendor(vendorId, sharedFields)
+      : await createVendor({ vendor_id: vendorId, status: 'ACTIVE', ...sharedFields })
+
+    await this.userRepository.saveCashfreeVendor(userId, {
+      cashfreeVendorId: vendor.vendor_id,
+      cashfreeVendorStatus: vendor.status,
+      cashfreeVendorResponse: vendor,
     })
 
-    await this.userRepository.saveRazorpayAccount(userId, {
-      razorpayAccountId: account.id,
-      razorpayAccountStatus: account.status,
-      razorpayReferenceId: account.reference_id,
-      razorpayAccountResponse: account,
-    })
+    // Documents — only runs when the caller actually sent some this call. A
+    // caller without documents ready yet can complete vendor creation now
+    // and re-call this same endpoint later, once ImageKit URLs exist, to
+    // attach them.
+    const documentsUploaded: string[] = []
+    if (dto.documents?.length) {
+      for (const doc of dto.documents) {
+        await uploadVendorDocument(vendorId, doc.type, 'KYC', doc.url)
+        documentsUploaded.push(doc.type)
+      }
+    }
 
     return {
-      id: account.id,
-      status: account.status,
-      referenceId: account.reference_id,
-      alreadyExists: false,
+      vendorId: vendor.vendor_id,
+      status: vendor.status,
+      requirements: vendor.requirements ?? [],
+      documentsUploaded,
+      alreadyExists,
     }
   }
 
   // GET /users/me/bank-onboarding — live status pulled straight from
-  // Razorpay (not just whatever we last cached in razorpayAccountResponse),
-  // keyed off the account id we saved for THIS user — never accepts an
-  // account id from the caller, so one user can't probe another's account.
+  // Cashfree (not just whatever we last cached in cashfreeVendorResponse),
+  // keyed off the vendor id we saved for THIS user — never accepts a
+  // vendor id from the caller, so one user can't probe another's vendor.
   async getBankOnboardingStatus(userId: string) {
     const profile = await this.userRepository.findAstrologerApplication(userId)
 
-    if (!profile?.razorpayAccountId) {
+    if (!profile?.cashfreeVendorId) {
       throw NotFoundError('Bank onboarding has not been started for this astrologer yet')
     }
 
-    return getRazorpayAccount(profile.razorpayAccountId)
+    return getVendor(profile.cashfreeVendorId)
   }
 
   // ── Phone verification (Google-login users, during onboarding) ─────────────

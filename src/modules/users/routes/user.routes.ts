@@ -123,8 +123,16 @@ export async function userRoutes(app: FastifyInstance) {
               // Additive fields — old clients that don't read these keep
               // working unchanged. null for non-astrologers and for
               // astrologers who haven't started bank onboarding yet.
-              razorpayAccountId: { type: ['string', 'null'] },
-              razorpayAccountStatus: { type: ['string', 'null'] },
+              //
+              // razorpayAccountId/Status/ProductId/ProductStatus —
+              // commented out during the Cashfree migration, kept for
+              // rollback. IMPORTANT: Fastify's response schema silently
+              // strips any property the service returns that isn't listed
+              // here (fast-json-stringify only serializes declared
+              // properties) — this is exactly why cashfreeVendorId below
+              // must be declared, not just returned from the service.
+              cashfreeVendorId: { type: ['string', 'null'] },
+              cashfreeVendorStatus: { type: ['string', 'null'] },
             },
           },
         },
@@ -245,18 +253,20 @@ export async function userRoutes(app: FastifyInstance) {
     userController.getAstrologerApplicationStatus,
   )
 
-  // POST /users/me/bank-onboarding
+  // POST /users/me/bank-onboarding — Cashfree Easy Split vendor create/update
+  // (replaces the old Razorpay Route account/product/bank-details/documents
+  // route registrations below, commented out for rollback).
   app.post(
     `${prefix}/me/bank-onboarding`,
     {
       preHandler: [authenticate],
       schema: {
         tags: ['Users'],
-        summary: 'Bank onboarding — creates a Razorpay Route linked account (payouts) for an astrologer',
+        summary: 'Bank onboarding — creates/updates a Cashfree Easy Split vendor (payouts) for an astrologer',
         security: [{ bearerAuth: [] }],
         body: {
           type: 'object',
-          required: ['email', 'phone', 'legalBusinessName', 'category', 'subcategory', 'address'],
+          required: ['email', 'phone', 'contactName', 'pan'],
           properties: {
             email: { type: 'string', format: 'email' },
             phone: {
@@ -265,39 +275,103 @@ export async function userRoutes(app: FastifyInstance) {
               description:
                 'Indian mobile number — with or without +91/91 country code (e.g. "9830012345" or "+919830012345")',
             },
-            legalBusinessName: { type: 'string', minLength: 2, maxLength: 255 },
             contactName: { type: 'string', minLength: 2, maxLength: 255 },
-            businessType: {
+            accountType: {
               type: 'string',
               enum: [
-                'individual',
-                'proprietorship',
-                'partnership',
-                'huf',
-                'private_limited',
-                'public_limited',
-                'llp',
-                'ngo',
-                'trust',
-                'society',
-                'not_yet_registered',
-                'other',
+                'Individual',
+                'Proprietorship',
+                'Partnership',
+                'LLP',
+                'Private Limited',
+                'Public Limited',
+                'Trust',
+                'NGO',
+                'Society',
+                'Other',
               ],
-              default: 'individual',
-              description: 'Determines which PAN/KYC format Razorpay expects for this account',
+              default: 'Individual',
             },
-            category: { type: 'string' },
-            subcategory: { type: 'string' },
-            address: {
+            businessCategory: {
+              type: 'string',
+              description: 'Fixed enum Cashfree validates against — see CashfreeBusinessCategorySchema',
+              enum: [
+                'Grocery',
+                'Jewellery',
+                'Miscellaneous',
+                'Web host/Domain seller',
+                'E-commerce',
+                'Online Gaming',
+                'Society/Trust/Club/Association',
+                'Mutual funds/Broking',
+                'B2B',
+                'Real Estate',
+                'Housing',
+                'Rentals',
+                'Utilities',
+                'Travel and Hospitality',
+                'Education',
+                'Food and Beverages',
+                'NBFCs/Organizations into Lending',
+                'Chit Funds',
+                'Non Profit/NGO',
+                'Financial Services',
+                'Government',
+                'Readymade',
+                'SaaS',
+                'Professional Services (Doctors, Lawyers, Architects, CAs, and other Professionals)',
+                'Open and Semi Open Wallet',
+                'Social Media and Entertainment',
+                'Pan shop',
+                'Telecom',
+                'Digital Goods',
+                'Insurance',
+                'Pharmacy',
+                'Healthcare',
+                'Retail and Shopping',
+                'Gaming',
+                'Logistics',
+              ],
+              default: 'Professional Services (Doctors, Lawyers, Architects, CAs, and other Professionals)',
+            },
+            pan: {
+              type: 'string',
+              pattern: '^[A-Za-z]{3}P[A-Za-z]\\d{4}[A-Za-z]$',
+              description: "Owner's PAN — part of the vendor's KYC",
+            },
+            gst: { type: 'string' },
+            bank: {
               type: 'object',
-              required: ['street1', 'city', 'state', 'postalCode'],
+              description: 'Provide bank OR upi (at least one required)',
+              required: ['accountNumber', 'ifscCode', 'beneficiaryName'],
               properties: {
-                street1: { type: 'string' },
-                street2: { type: 'string' },
-                city: { type: 'string' },
-                state: { type: 'string' },
-                postalCode: { type: 'string' },
-                country: { type: 'string', minLength: 2, maxLength: 2, default: 'IN' },
+                accountNumber: { type: 'string', minLength: 5, maxLength: 34 },
+                ifscCode: { type: 'string', pattern: '^[A-Z]{4}0[A-Z0-9]{6}$' },
+                beneficiaryName: { type: 'string', minLength: 2, maxLength: 120 },
+              },
+            },
+            upi: {
+              type: 'object',
+              required: ['vpa', 'beneficiaryName'],
+              properties: {
+                vpa: { type: 'string', minLength: 3, maxLength: 120 },
+                beneficiaryName: { type: 'string', minLength: 2, maxLength: 120 },
+              },
+            },
+            documents: {
+              type: 'array',
+              description:
+                'Optional — documents already uploaded to storage (e.g. ImageKit). Omit and re-call this same endpoint later once ready.',
+              items: {
+                type: 'object',
+                required: ['url', 'type'],
+                properties: {
+                  url: { type: 'string', format: 'uri' },
+                  type: {
+                    type: 'string',
+                    enum: ['pan_card', 'gst_certificate', 'cancelled_cheque', 'business_proof', 'id_proof'],
+                  },
+                },
               },
             },
           },
@@ -310,9 +384,10 @@ export async function userRoutes(app: FastifyInstance) {
               account: {
                 type: 'object',
                 properties: {
-                  id: { type: 'string' },
+                  vendorId: { type: 'string' },
                   status: { type: ['string', 'null'] },
-                  referenceId: { type: ['string', 'null'] },
+                  requirements: { type: 'array' },
+                  documentsUploaded: { type: 'array', items: { type: 'string' } },
                   alreadyExists: { type: 'boolean' },
                 },
               },
@@ -323,6 +398,11 @@ export async function userRoutes(app: FastifyInstance) {
     },
     userController.startBankOnboarding,
   )
+
+  // POST /users/me/bank-onboarding/bank-details — commented out: Cashfree
+  // collects bank/UPI in the same call as /me/bank-onboarding above, so this
+  // second step no longer exists. Kept for rollback, not deleted.
+  // app.post(`${prefix}/me/bank-onboarding/bank-details`, { ... }, userController.submitBankDetails)
 
   // POST /users/me/phone/send-otp
   // Google-login users add + verify a phone during onboarding. Authenticated
@@ -411,14 +491,14 @@ export async function userRoutes(app: FastifyInstance) {
     userController.verifyPhoneOtp,
   )
 
-  // GET /users/me/bank-onboarding — live account details from Razorpay
+  // GET /users/me/bank-onboarding — live vendor details from Cashfree
   app.get(
     `${prefix}/me/bank-onboarding`,
     {
       preHandler: [authenticate],
       schema: {
         tags: ['Users'],
-        summary: "Fetch the logged-in astrologer's live Razorpay account details",
+        summary: "Fetch the logged-in astrologer's live Cashfree vendor details",
         security: [{ bearerAuth: [] }],
         response: {
           200: {

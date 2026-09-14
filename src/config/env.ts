@@ -72,12 +72,31 @@ const envSchema = z.object({
   YOUTUBE_CHANNEL_ID: z.string().optional(),
   YOUTUBE_CACHE_TTL_MS: z.coerce.number().default(5 * 60_000),
 
-  // Razorpay
-  RAZORPAY_KEY_ID: z.string().min(1, 'RAZORPAY_KEY_ID is required'),
-  RAZORPAY_KEY_SECRET: z.string().min(1, 'RAZORPAY_KEY_SECRET is required'),
-  RAZORPAY_API_ENDPOINT: z.string().url().default('https://api.razorpay.com'),
-  RAZORPAY_API_VERSION_1: z.string().min(1).default('v1'),
-  RAZORPAY_API_VERSION_2: z.string().min(1).default('v2'),
+  // Razorpay — commented out during the Cashfree migration (kept, not
+  // deleted, so this is a quick uncomment-and-redeploy rollback if Cashfree
+  // needs to be backed out). Do not remove RAZORPAY_* from .env either.
+  // RAZORPAY_KEY_ID: z.string().min(1, 'RAZORPAY_KEY_ID is required'),
+  // RAZORPAY_KEY_SECRET: z.string().min(1, 'RAZORPAY_KEY_SECRET is required'),
+  // RAZORPAY_API_ENDPOINT: z.string().url().default('https://api.razorpay.com'),
+  // RAZORPAY_API_VERSION_1: z.string().min(1).default('v1'),
+  // RAZORPAY_API_VERSION_2: z.string().min(1).default('v2'),
+
+  // Cashfree Payments (Easy Split) — orders, split payouts, refunds and
+  // vendor onboarding all go through this one account.
+  CASHFREE_APP_ID: z.string().min(1, 'CASHFREE_APP_ID is required'),
+  CASHFREE_SECRET_KEY: z.string().min(1, 'CASHFREE_SECRET_KEY is required'),
+  CASHFREE_API_ENDPOINT: z.string().url().default('https://sandbox.cashfree.com'),
+  CASHFREE_API_VERSION: z.string().min(1).default('2026-01-01'),
+  // Tells the mobile app which CFEnvironment to launch checkout with —
+  // kept server-driven (not hardcoded client-side) so switching sandbox/prod
+  // doesn't need an app release.
+  CASHFREE_ENVIRONMENT: z.enum(['SANDBOX', 'PRODUCTION']).default('SANDBOX'),
+  // Publicly reachable base URL for THIS backend — Cashfree calls back to
+  // `${BACKEND_PUBLIC_URL}/payments/webhooks/cashfree` (order_meta.notify_url)
+  // once a payment resolves. Cashfree's servers can't reach localhost/LAN
+  // IPs, so local testing needs a tunnel (e.g. ngrok) with its https URL set
+  // here.
+  BACKEND_PUBLIC_URL: z.string().url('BACKEND_PUBLIC_URL is required'),
 })
 
 const parsed = envSchema.safeParse(process.env)
