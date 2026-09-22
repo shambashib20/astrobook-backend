@@ -13,7 +13,7 @@ import { AppointmentRepository } from './modules/consultation/repositories/appoi
 import { PushNotificationService } from './core/services/push-notification.service'
 import { NotificationsRepository } from './modules/notifications/repositories/notifications.repository'
 import { NotificationsService } from './modules/notifications/services/notifications.service'
-import { runMonthlySettlement } from './core/services/vendor-settlement-runner'
+// import { runMonthlySettlement } from './core/services/vendor-settlement-runner'
 import { SessionSweepScheduler } from './core/services/session-sweep-scheduler'
 // Cashfree Easy Split monthly vendor settlement cron — commented out during
 // the Razorpay rollback (kept, not deleted, for a quick re-migration). See
