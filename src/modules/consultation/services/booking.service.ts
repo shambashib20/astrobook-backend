@@ -290,10 +290,11 @@ export class BookingService {
 
     const updated = await this.appointmentRepository.update(appointmentId, { status: 'cancelled' })
 
-    // Refunds are admin-approved, never automatic — this just flags the
-    // payment (if one succeeded) as awaiting an admin's refund decision.
-    // No-op if there's no successful payment on this appointment.
-    await this.paymentRepository.markRefundPending(appointmentId)
+    // Cashfree's admin-approved refund flow (flagging a paid appointment's
+    // payment for refund) — commented out during the Razorpay rollback,
+    // kept, not deleted, for a quick re-migration; no refund concept
+    // existed pre-Cashfree.
+    // await this.paymentRepository.markRefundPending(appointmentId)
 
     // Jo party cancel nahi kar rahi, usko batao — requester ko khud pata hai
     const otherPartyId =

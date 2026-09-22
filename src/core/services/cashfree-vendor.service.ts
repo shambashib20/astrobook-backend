@@ -1,3 +1,8 @@
+// Commented out during the Razorpay rollback (kept, not deleted, as a
+// quick re-migration). env.CASHFREE_* no longer exist on `env` (see
+// src/config/env.ts), so this whole file is block-commented to stay out
+// of the TypeScript build until uncommented.
+/*
 import axios, { isAxiosError } from 'axios'
 import { env } from '@/config/env'
 import { BadRequestError, InternalError } from '@/core/errors'
@@ -220,3 +225,5 @@ export async function uploadVendorDocument(
     handleCashfreeError(err, `Failed to upload document (${docType})`)
   }
 }
+
+*/

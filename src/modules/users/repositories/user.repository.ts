@@ -94,13 +94,10 @@ export class UserRepository {
     return profile ?? null
   }
 
-  // ── Cashfree Easy Split vendor onboarding ───────────────────────────────────
+  // ── Razorpay Route onboarding ────────────────────────────────────────────────
 
-  // Cashfree's vendor_id is caller-chosen and deterministic per astrologer
-  // (see generateCashfreeVendorId), so — unlike Razorpay's reference_id —
-  // there's no need to mint anything before the vendor call goes out. If the
-  // user hasn't submitted an astrologer application yet, create a bare
-  // pending row here rather than failing the onboarding step on that.
+  // If the user hasn't submitted an astrologer application yet, create a
+  // bare pending row here rather than failing the onboarding step on that.
   async ensureAstrologerProfile(userId: string) {
     const [profile] = await this.db
       .insert(astrologerProfiles)
@@ -122,22 +119,18 @@ export class UserRepository {
     return user ?? null
   }
 
-  // ── Razorpay Route persistence (commented out during the Cashfree
-  // migration — kept, not deleted, for a quick rollback) ──
-  // async saveRazorpayAccount(userId: string, data: {...}) { ... }
-  // async saveRazorpayProduct(userId: string, data: {...}) { ... }
-  // async saveRazorpayStakeholder(userId: string, data: {...}) { ... }
-  // async saveRazorpayDocuments(userId: string, uploadedByType: Record<string, unknown>) { ... }
+  // Razorpay Route onboarding is 4 staged calls (account → product →
+  // stakeholder → documents) — each step persists as soon as it comes back,
+  // so a caller that fails partway through can resume from wherever it left
+  // off instead of losing everything.
 
-  // Single save — Cashfree's vendor create/update call returns everything
-  // (bank/UPI + KYC + status) in one response, so there's only one method
-  // here instead of Razorpay Route's four staged saves.
-  async saveCashfreeVendor(
+  async saveRazorpayAccount(
     userId: string,
     data: {
-      cashfreeVendorId: string
-      cashfreeVendorStatus: string
-      cashfreeVendorResponse: unknown
+      razorpayAccountId: string
+      razorpayAccountStatus: string
+      razorpayReferenceId: string
+      razorpayAccountResponse: unknown
     },
   ) {
     const [profile] = await this.db
@@ -146,18 +139,52 @@ export class UserRepository {
         userId,
         verificationStatus: 'pending',
         ...data,
-        cashfreeVendorCreatedAt: sql`now()`,
+        razorpayAccountCreatedAt: sql`now()`,
       })
       .onConflictDoUpdate({
         target: astrologerProfiles.userId,
-        set: {
-          ...data,
-          updatedAt: sql`now()`,
-        },
+        set: { ...data, updatedAt: sql`now()` },
       })
       .returning()
     return profile ?? null
   }
+
+  async saveRazorpayProduct(
+    userId: string,
+    data: { razorpayProductId: string; razorpayProductStatus: string; razorpayProductResponse: unknown },
+  ) {
+    const [profile] = await this.db
+      .update(astrologerProfiles)
+      .set({ ...data, updatedAt: sql`now()` })
+      .where(eq(astrologerProfiles.userId, userId))
+      .returning()
+    return profile ?? null
+  }
+
+  async saveRazorpayStakeholder(
+    userId: string,
+    data: { razorpayStakeholderId: string; razorpayStakeholderResponse: unknown },
+  ) {
+    const [profile] = await this.db
+      .update(astrologerProfiles)
+      .set({ ...data, updatedAt: sql`now()` })
+      .where(eq(astrologerProfiles.userId, userId))
+      .returning()
+    return profile ?? null
+  }
+
+  async saveRazorpayDocuments(userId: string, uploadedByType: Record<string, unknown>) {
+    const [profile] = await this.db
+      .update(astrologerProfiles)
+      .set({ razorpayDocumentsResponse: uploadedByType, updatedAt: sql`now()` })
+      .where(eq(astrologerProfiles.userId, userId))
+      .returning()
+    return profile ?? null
+  }
+
+  // ── Cashfree Easy Split vendor persistence (commented out during the
+  // Razorpay rollback — kept, not deleted, for a quick re-migration) ──
+  // async saveCashfreeVendor(userId: string, data: {...}) { ... }
 
   // ── Phone verification (Google-login users, during onboarding) ─────────────
   // Reuses the same otp_verifications table as /auth/send-otp — logic mirrors

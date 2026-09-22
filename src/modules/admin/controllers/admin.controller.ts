@@ -22,25 +22,11 @@ export class AdminController {
     return reply.status(200).send(stats)
   }
 
-  // POST /admin/astrologers/:id/cashfree-refresh
-  refreshVendorStatus = async (request: FastifyRequest, reply: FastifyReply) => {
-    const { id } = request.params as { id: string }
-    const astrologer = await this.adminService.refreshVendorStatus(id)
-    return reply.status(200).send({ message: 'Vendor status refreshed', astrologer })
-  }
-
-  // GET /admin/payments/refunds-pending
-  listPendingRefunds = async (_request: FastifyRequest, reply: FastifyReply) => {
-    const refunds = await this.adminService.listPendingRefunds()
-    return reply.status(200).send({ refunds })
-  }
-
-  // POST /admin/payments/:paymentId/refund
-  approveRefund = async (request: FastifyRequest, reply: FastifyReply) => {
-    const { paymentId } = request.params as { paymentId: string }
-    const payment = await this.adminService.approveRefund(paymentId)
-    return reply.status(200).send({ message: 'Refund processed', payment })
-  }
+  // Cashfree vendor-refresh + refund endpoints — commented out during the
+  // Razorpay rollback (kept, not deleted, for a quick re-migration).
+  // refreshVendorStatus = async (request: FastifyRequest, reply: FastifyReply) => { ... }
+  // listPendingRefunds = async (_request: FastifyRequest, reply: FastifyReply) => { ... }
+  // approveRefund = async (request: FastifyRequest, reply: FastifyReply) => { ... }
 
   // GET /admin/health
   // Always 200 — the panel reads `status`/`checks[*].status` from the body
