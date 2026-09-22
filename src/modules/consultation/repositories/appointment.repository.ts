@@ -154,6 +154,26 @@ export class AppointmentRepository {
       )
   }
 
+  // Session sweep ko kab dobara chalna hai — sabse jaldi aane wala kaam:
+  //   - kisi 'ongoing' session ka endsAt (auto-complete ke liye), ya
+  //   - kisi confirmed appointment ka reminder time (scheduledAt - 5 min)
+  // Kuch bhi pending na ho to null. LEAST() Postgres mein NULL ignore karta
+  // hai, isliye ek side khaali ho to dusri wali time milti hai.
+  async findNextSweepDueAt(): Promise<Date | null> {
+    const result = await this.db.execute<{ next_due: Date | string | null }>(sql`
+      SELECT LEAST(
+        (SELECT min(${appointments.endsAt}) FROM ${appointments}
+          WHERE ${appointments.status} = 'ongoing'),
+        (SELECT min(${appointments.scheduledAt}) - interval '5 minutes' FROM ${appointments}
+          WHERE ${appointments.status} = 'confirmed'
+            AND ${appointments.reminderSentAt} IS NULL
+            AND ${appointments.scheduledAt} > now())
+      ) AS next_due
+    `)
+    const nextDue = result.rows[0]?.next_due
+    return nextDue ? new Date(nextDue) : null
+  }
+
   async markReminderSent(id: string) {
     await this.db
       .update(appointments)

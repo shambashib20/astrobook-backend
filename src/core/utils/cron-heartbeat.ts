@@ -1,6 +1,6 @@
 /**
- * Tracks liveness of the background interval jobs (session auto-timeout
- * sweep, DB keep-alive ping, etc.) so the admin health endpoint can report
+ * Tracks liveness of the background jobs (session auto-timeout/reminder
+ * sweep, notification cleanup, settlement) so the admin health endpoint can report
  * whether they're actually ticking, not just that the process is up.
  */
 
@@ -8,10 +8,11 @@
 // that records heartbeats (server.ts, database client) and the code that
 // reads status back out (admin health endpoint), so they can't drift apart.
 export const SESSION_SWEEP_JOB = 'session-sweep'
-export const SESSION_SWEEP_INTERVAL_MS = 60 * 1000
-
-export const DB_KEEPALIVE_JOB = 'db-keepalive'
-export const DB_KEEPALIVE_INTERVAL_MS = 4 * 60_000
+// Session sweep ab fixed "har minute" nahi chalta — agla run tab hota hai jab
+// koi kaam due ho (reminder / session end), ya koi write request aaye. Kuch
+// due na ho to bhi zyada se zyada itne gap pe ek baar chalta hai. Health check
+// isi max gap ko expected interval maanta hai. (Dekho session-sweep-scheduler.ts)
+export const SESSION_SWEEP_INTERVAL_MS = 60 * 60 * 1000
 
 // 7-din se purani notifications delete karne wala sweep — retention window
 // mein kaafi slack hai (koi bhi ek notification 7-8 din tak rehti hai chahe
@@ -73,9 +74,9 @@ export type CronJobStatus = {
 export function getCronStatus(jobName: string, expectedIntervalMs: number): CronJobStatus {
   const state = jobs.get(jobName)
   if (!state?.lastRunAt) {
-    // Fresh restart — the job's first tick hasn't come due yet (e.g.
-    // db-keepalive only fires every 4 min). Not an actual failure, so give
-    // it one full interval + buffer before calling it unhealthy.
+    // Fresh restart — the job's first tick hasn't come due yet (e.g. the
+    // notification cleanup only fires every 6 hours). Not an actual failure,
+    // so give it one full interval + buffer before calling it unhealthy.
     const withinStartupGrace = Date.now() - processStartedAt <= expectedIntervalMs * 1.5
     return {
       name: jobName,

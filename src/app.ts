@@ -13,6 +13,7 @@ import { postsRoutes } from './modules/posts'
 import { followsRoutes } from './modules/follows'
 import { notificationsRoutes } from './modules/notifications'
 import { youtubeRoutes } from './modules/youtube'
+import { wakeSessionSweep } from './core/services/session-sweep-scheduler'
 
 export async function buildApp() {
   const app = Fastify({
@@ -39,6 +40,18 @@ export async function buildApp() {
     // (registered in registerPlugins) does the exact same thing with the same
     // fields, so every request was paying for two log writes instead of one.
     disableRequestLogging: true,
+  })
+
+  // Koi bhi successful write request (booking, payment webhook, session
+  // start/extend, reschedule...) appointments badal sakti hai — session sweep
+  // ko bolo ki agla reminder / session-end ka time dobara dekh le. Us waqt DB
+  // already jaaga hai, isliye ye recheck free hai. Plugins/routes se PEHLE
+  // register karna zaroori hai taaki saare routes pe lage.
+  app.addHook('onResponse', async (request, reply) => {
+    const method = request.method
+    if (method === 'GET' || method === 'HEAD' || method === 'OPTIONS') return
+    if (reply.statusCode >= 400) return
+    wakeSessionSweep()
   })
 
   // Register plugins (cors, helmet, JWT, error handlers, etc.)
