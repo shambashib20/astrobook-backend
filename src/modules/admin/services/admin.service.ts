@@ -8,8 +8,6 @@ import type { PaymentRepository } from '@/modules/payment/repositories/payment.r
 import type { AppointmentRepository } from '@/modules/consultation/repositories/appointment.repository'
 import type { PushNotificationService } from '@/core/services/push-notification.service'
 import {
-  DB_KEEPALIVE_INTERVAL_MS,
-  DB_KEEPALIVE_JOB,
   SESSION_SWEEP_INTERVAL_MS,
   SESSION_SWEEP_JOB,
   SETTLEMENT_INTERVAL_MS,
@@ -133,7 +131,6 @@ export class AdminService {
   private async checkCron() {
     const jobs = [
       getCronStatus(SESSION_SWEEP_JOB, SESSION_SWEEP_INTERVAL_MS),
-      getCronStatus(DB_KEEPALIVE_JOB, DB_KEEPALIVE_INTERVAL_MS),
       getCronStatus(SETTLEMENT_JOB, SETTLEMENT_INTERVAL_MS),
     ]
     const allHealthy = jobs.every((job) => job.healthy)
