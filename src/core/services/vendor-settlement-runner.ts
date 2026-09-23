@@ -1,3 +1,10 @@
+// Commented out during the Razorpay rollback (kept, not deleted, as a
+// quick re-migration) — depends on vendorSettlements/cashfreeVendorId,
+// which are commented out (see src/core/database/schema/consultation.ts,
+// users.ts) and on cashfree-vendor.service.ts, which is fully
+// block-commented. This whole file is block-commented to stay out of the
+// TypeScript build until uncommented.
+/*
 import { desc, eq, isNotNull } from 'drizzle-orm'
 import type { Database } from '@/core/database/client'
 import { astrologerProfiles, vendorSettlements } from '@/core/database/schema'
@@ -64,3 +71,5 @@ export async function runMonthlySettlement(
 
   return { settled, failed }
 }
+
+*/

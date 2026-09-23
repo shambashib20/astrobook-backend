@@ -8,7 +8,7 @@ import {
   posts,
   users,
 } from '@/core/database/schema'
-import { and, count, desc, eq, ilike, isNotNull, isNull, or, sql } from 'drizzle-orm'
+import { and, count, desc, eq, ilike, or, sql } from 'drizzle-orm'
 import type {
   ListAstrologersQueryDto,
   ListPostsQueryDto,
@@ -147,15 +147,16 @@ export class AdminRepository {
       // columns as strings to avoid precision loss, which silently turned
       // this into a string in the JSON response despite the number type here.
       commissionPercentage: sql<number | null>`(${users.meta}->>'commissionPercentage')::float8`,
-      // Cashfree Easy Split reconciliation — cached from our own DB (last
-      // onboarding call or the admin refresh action), not a live Cashfree
-      // call on every list page load. cashfreeVendorResponse carries
-      // whatever Cashfree last returned (bank/upi on file, remarks, etc.)
-      // for admins who need the detail without a separate round trip.
-      cashfreeVendorId: astrologerProfiles.cashfreeVendorId,
-      cashfreeVendorStatus: astrologerProfiles.cashfreeVendorStatus,
-      cashfreeVendorResponse: astrologerProfiles.cashfreeVendorResponse,
-      cashfreeVendorCreatedAt: astrologerProfiles.cashfreeVendorCreatedAt,
+      // Cashfree Easy Split reconciliation fields — commented out during
+      // the Razorpay rollback (kept, not deleted, for a quick re-migration).
+      // cashfreeVendorId: astrologerProfiles.cashfreeVendorId,
+      // cashfreeVendorStatus: astrologerProfiles.cashfreeVendorStatus,
+      // cashfreeVendorResponse: astrologerProfiles.cashfreeVendorResponse,
+      // cashfreeVendorCreatedAt: astrologerProfiles.cashfreeVendorCreatedAt,
+      razorpayAccountId: astrologerProfiles.razorpayAccountId,
+      razorpayAccountStatus: astrologerProfiles.razorpayAccountStatus,
+      razorpayProductId: astrologerProfiles.razorpayProductId,
+      razorpayProductStatus: astrologerProfiles.razorpayProductStatus,
     }
   }
 
@@ -172,11 +173,13 @@ export class AdminRepository {
       if (searchCondition) conditions.push(searchCondition)
     }
     if (filters.status) conditions.push(eq(astrologerProfiles.verificationStatus, filters.status))
-    if (filters.cashfreeStatus === 'onboarded') {
-      conditions.push(isNotNull(astrologerProfiles.cashfreeVendorId))
-    } else if (filters.cashfreeStatus === 'not_onboarded') {
-      conditions.push(isNull(astrologerProfiles.cashfreeVendorId))
-    }
+    // Cashfree onboarding-status filter — commented out during the
+    // Razorpay rollback (kept, not deleted, for a quick re-migration).
+    // if (filters.cashfreeStatus === 'onboarded') {
+    //   conditions.push(isNotNull(astrologerProfiles.cashfreeVendorId))
+    // } else if (filters.cashfreeStatus === 'not_onboarded') {
+    //   conditions.push(isNull(astrologerProfiles.cashfreeVendorId))
+    // }
 
     const where = and(...conditions)
     const offset = (filters.page - 1) * filters.limit
@@ -200,21 +203,9 @@ export class AdminRepository {
     return { rows, total: totalRow?.value ?? 0 }
   }
 
-  // Admin-triggered manual refresh (see AdminService.refreshVendorStatus) —
-  // caches whatever Cashfree's live GET /vendors/:id just returned, so the
-  // paginated list above can keep reading from our own DB instead of
-  // calling Cashfree on every page load.
-  async updateCashfreeVendorCache(
-    userId: string,
-    data: { cashfreeVendorStatus: string; cashfreeVendorResponse: unknown },
-  ) {
-    const [profile] = await this.db
-      .update(astrologerProfiles)
-      .set({ ...data, updatedAt: sql`now()` })
-      .where(eq(astrologerProfiles.userId, userId))
-      .returning()
-    return profile ?? null
-  }
+  // Cashfree vendor-status cache update — commented out during the
+  // Razorpay rollback (kept, not deleted, for a quick re-migration).
+  // async updateCashfreeVendorCache(userId: string, data: {...}) { ... }
 
   async findAstrologerById(userId: string) {
     const [row] = await this.db

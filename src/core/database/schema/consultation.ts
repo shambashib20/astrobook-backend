@@ -229,34 +229,24 @@ export const payments = pgTable(
     appointmentId: uuid('appointment_id')
       .notNull()
       .references(() => appointments.id, { onDelete: 'cascade' }),
-    // ── Razorpay (commented out during the Cashfree migration — kept, not
-    // deleted, for a quick rollback) ──
-    // razorpayOrderId: varchar('razorpay_order_id', { length: 255 }),
-    // razorpayPaymentId: varchar('razorpay_payment_id', { length: 255 }),
-    // razorpaySignature: varchar('razorpay_signature', { length: 512 }),
+    // ── Razorpay — active again (Cashfree migration rolled back) ──
+    razorpayOrderId: varchar('razorpay_order_id', { length: 255 }),
+    razorpayPaymentId: varchar('razorpay_payment_id', { length: 255 }),
+    razorpaySignature: varchar('razorpay_signature', { length: 512 }),
 
-    // Cashfree order/payment — webhook confirms these (see cashfree
-    // webhook route), not a client-supplied signature like Razorpay had.
-    cashfreeOrderId: varchar('cashfree_order_id', { length: 255 }),
-    cashfreePaymentId: varchar('cashfree_payment_id', { length: 255 }),
-
-    // Split snapshot at order-creation time — admin can change an
-    // astrologer's commissionPercentage anytime, so this freezes what was
-    // actually used on THIS order (refunds must mirror this, not whatever
-    // the commission is today).
-    platformCommissionPercentage: numeric('platform_commission_percentage', {
-      precision: 5,
-      scale: 2,
-    }),
-    astrologerPayoutAmount: numeric('astrologer_payout_amount', { precision: 10, scale: 2 }),
-
-    // Refund (new — no refund concept existed before Cashfree). Admin-
-    // approved: cancelling an appointment only sets this to 'pending';
-    // an explicit admin action fires the actual Cashfree refund.
-    refundStatus: varchar('refund_status', { length: 16 }), // 'pending' | 'processing' | 'success' | 'failed'
-    refundedAmount: numeric('refunded_amount', { precision: 10, scale: 2 }),
-    refundedAt: timestamp('refunded_at', { withTimezone: true }),
-    cashfreeRefundId: varchar('cashfree_refund_id', { length: 255 }),
+    // ── Cashfree (commented out during the Razorpay rollback — kept, not
+    // deleted, for a quick re-migration) ──
+    // cashfreeOrderId: varchar('cashfree_order_id', { length: 255 }),
+    // cashfreePaymentId: varchar('cashfree_payment_id', { length: 255 }),
+    // platformCommissionPercentage: numeric('platform_commission_percentage', {
+    //   precision: 5,
+    //   scale: 2,
+    // }),
+    // astrologerPayoutAmount: numeric('astrologer_payout_amount', { precision: 10, scale: 2 }),
+    // refundStatus: varchar('refund_status', { length: 16 }), // 'pending' | 'processing' | 'success' | 'failed'
+    // refundedAmount: numeric('refunded_amount', { precision: 10, scale: 2 }),
+    // refundedAt: timestamp('refunded_at', { withTimezone: true }),
+    // cashfreeRefundId: varchar('cashfree_refund_id', { length: 255 }),
 
     amount: numeric('amount', { precision: 10, scale: 2 }).notNull(),
     status: paymentStatusEnum('status').notNull().default('pending'),
@@ -266,35 +256,34 @@ export const payments = pgTable(
   (table) => ({
     appointmentIdIdx: index('payments_appointment_id_idx').on(table.appointmentId),
     // Cashfree webhook handler looks payments up by order id — every
-    // webhook delivery was a full table scan without this.
-    cashfreeOrderIdIdx: index('payments_cashfree_order_id_idx').on(table.cashfreeOrderId),
+    // webhook delivery was a full table scan without this. (Commented out
+    // alongside cashfreeOrderId during the Razorpay rollback.)
+    // cashfreeOrderIdIdx: index('payments_cashfree_order_id_idx').on(table.cashfreeOrderId),
   }),
 )
 
 // ─── Vendor Settlements (Cashfree Easy Split — monthly payout audit) ─────────
-// Astrologers ko har mahine ki 8 tareekh ko settle kiya jaata hai (server.ts
-// ka cron), Cashfree ki khud ki scheduled-cycle feature use kiye bina (uska
-// exact day-of-month control nahi hai). Yeh table har run ka audit trail
-// rakhti hai — admin dashboard "kab kitna settle hua" yahan se dikha sakta
-// hai, bina har baar Cashfree se live query kiye.
-export const vendorSettlements = pgTable(
-  'vendor_settlements',
-  {
-    id: uuid('id').primaryKey().defaultRandom(),
-    astrologerId: uuid('astrologer_id')
-      .notNull()
-      .references(() => users.id, { onDelete: 'cascade' }),
-    cashfreeVendorId: varchar('cashfree_vendor_id', { length: 64 }).notNull(),
-    periodStart: timestamp('period_start', { withTimezone: true }).notNull(),
-    periodEnd: timestamp('period_end', { withTimezone: true }).notNull(),
-    status: varchar('status', { length: 16 }).notNull(), // 'success' | 'failed'
-    cashfreeResponse: jsonb('cashfree_response').$type<any>(),
-    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
-  },
-  (table) => ({
-    astrologerIdIdx: index('vendor_settlements_astrologer_id_idx').on(table.astrologerId),
-  }),
-)
+// Commented out during the Razorpay rollback (kept, not deleted, for a quick
+// re-migration) — no Razorpay equivalent, Route settles per-transfer, not on
+// a monthly cron.
+// export const vendorSettlements = pgTable(
+//   'vendor_settlements',
+//   {
+//     id: uuid('id').primaryKey().defaultRandom(),
+//     astrologerId: uuid('astrologer_id')
+//       .notNull()
+//       .references(() => users.id, { onDelete: 'cascade' }),
+//     cashfreeVendorId: varchar('cashfree_vendor_id', { length: 64 }).notNull(),
+//     periodStart: timestamp('period_start', { withTimezone: true }).notNull(),
+//     periodEnd: timestamp('period_end', { withTimezone: true }).notNull(),
+//     status: varchar('status', { length: 16 }).notNull(), // 'success' | 'failed'
+//     cashfreeResponse: jsonb('cashfree_response').$type<any>(),
+//     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+//   },
+//   (table) => ({
+//     astrologerIdIdx: index('vendor_settlements_astrologer_id_idx').on(table.astrologerId),
+//   }),
+// )
 
 // ─── Service Requests (Mid-session upsell) ───────────────────────────────────
 
@@ -353,8 +342,8 @@ export type NewAppointment = typeof appointments.$inferInsert
 export type Payment = typeof payments.$inferSelect
 export type NewPayment = typeof payments.$inferInsert
 
-export type VendorSettlement = typeof vendorSettlements.$inferSelect
-export type NewVendorSettlement = typeof vendorSettlements.$inferInsert
+// export type VendorSettlement = typeof vendorSettlements.$inferSelect
+// export type NewVendorSettlement = typeof vendorSettlements.$inferInsert
 
 export type ServiceRequest = typeof serviceRequests.$inferSelect
 export type NewServiceRequest = typeof serviceRequests.$inferInsert

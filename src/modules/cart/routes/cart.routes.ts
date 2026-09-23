@@ -59,7 +59,7 @@ export async function cartRoutes(app: FastifyInstance) {
   // DELETE /cart/items/:id — cart se hatao
   app.delete('/cart/items/:id', { preHandler: [authenticate] }, cartController.removeItem)
 
-  // POST /cart/checkout/create-order — selected items ka ek combined Cashfree order (multi-vendor split)
+  // POST /cart/checkout/create-order — selected items ka ek combined Razorpay order
   app.post(
     '/cart/checkout/create-order',
     { preHandler: [authenticate] },

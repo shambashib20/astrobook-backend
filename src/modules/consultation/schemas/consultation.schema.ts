@@ -106,14 +106,11 @@ export const CreatePaymentOrderSchema = z.object({
   appointmentId: z.string().uuid(),
 })
 
-// Cashfree's hosted checkout doesn't hand the client a signed payment id
-// the way Razorpay did (razorpayOrderId/PaymentId/Signature — commented out
-// above during the migration) — confirmation is webhook-driven server-side
-// (see the /payments/webhooks/cashfree route), so this just re-reads
-// whatever status that webhook (or a live Cashfree status check) already
-// recorded for the appointment's payment.
 export const VerifyPaymentSchema = z.object({
   appointmentId: z.string().uuid(),
+  razorpayOrderId: z.string(),
+  razorpayPaymentId: z.string(),
+  razorpaySignature: z.string(),
 })
 
 // ─── Session ──────────────────────────────────────────────────────────────────

@@ -1,8 +1,3 @@
-// Commented out during the Cashfree migration (kept, not deleted, as a
-// quick rollback) — replaced by cashfree-vendor.service.ts. env.RAZORPAY_*
-// no longer exist on `env` (see src/config/env.ts), so this whole file is
-// block-commented to stay out of the TypeScript build until uncommented.
-/*
 import crypto from 'crypto'
 import axios, { isAxiosError } from 'axios'
 import { env } from '@/config/env'
@@ -379,4 +374,3 @@ export async function getRazorpayAccount(accountId: string): Promise<RazorpayAcc
     throw err
   }
 }
-*/
