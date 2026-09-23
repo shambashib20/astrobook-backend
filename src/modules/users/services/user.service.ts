@@ -1,23 +1,11 @@
 import { BadRequestError, ConflictError, NotFoundError, RateLimitError } from '@/core/errors'
 import { sendOtpSms } from '@/modules/auth'
-// Razorpay Route onboarding — active again (Cashfree migration rolled back).
-import {
-  createRazorpayAccount, createStakeholder, generateRazorpayReferenceId,
-  getRazorpayAccount, requestRouteProduct, updateRouteProductSettlements,
-  uploadAccountDocument,
-} from '@/core/services/razorpay-account.service'
-// Cashfree Easy Split vendor onboarding — commented out during the
-// Razorpay rollback (kept, not deleted, for a quick re-migration):
-// import {
-//   createVendor, generateCashfreeVendorId, getVendor, updateVendor, uploadVendorDocument,
-// } from '@/core/services/cashfree-vendor.service'
 import bcrypt from 'bcrypt'
 import type { UserRepository } from '../repositories/user.repository'
 import type {
-  CreateRazorpayAccountDto,
   OnboardingDto,
   RequestAstrologerUpgradeDto,
-  SubmitBankDetailsDto,
+  SavePayoutDetailsDto,
   UpdateProfileDto,
 } from '../schemas/user.schema'
 
@@ -45,21 +33,14 @@ export class UserService {
       throw NotFoundError('User not found')
     }
 
-    // Bank onboarding fields live on astrologer_profiles, not users — for a
-    // non-astrologer (or an astrologer who hasn't onboarded yet) this row
-    // simply won't exist, so both come back null rather than erroring.
+    // Payout details live on astrologer_profiles, not users — for a
+    // non-astrologer (or an astrologer who hasn't added them yet) this row
+    // / column simply won't exist, so this comes back null rather than erroring.
     const astrologerProfile = await this.userRepository.findAstrologerApplication(userId)
 
     return {
       ...user,
-      razorpayAccountId: astrologerProfile?.razorpayAccountId ?? null,
-      razorpayAccountStatus: astrologerProfile?.razorpayAccountStatus ?? null,
-      razorpayProductId: astrologerProfile?.razorpayProductId ?? null,
-      razorpayProductStatus: astrologerProfile?.razorpayProductStatus ?? null,
-      // Cashfree fields — commented out during the Razorpay rollback (kept
-      // for a quick re-migration).
-      // cashfreeVendorId: astrologerProfile?.cashfreeVendorId ?? null,
-      // cashfreeVendorStatus: astrologerProfile?.cashfreeVendorStatus ?? null,
+      payoutMethod: astrologerProfile?.payoutDetails ? astrologerProfile.payoutMethod : null,
     }
   }
 
@@ -111,160 +92,27 @@ export class UserService {
     return this.userRepository.submitAstrologerApplication(userId, dto)
   }
 
-  // ── Bank onboarding (Razorpay Route) ────────────────────────────────────────
-  // 4 staged calls: account → product (settlements/bank) → stakeholder (KYC)
-  // → documents. Each step persists as soon as it returns, so a caller that
-  // fails partway through (e.g. Razorpay's SPAM_DETECTED_ERROR heuristic on
-  // step 2) can safely re-call this same endpoint to resume — the account/
-  // product ids already saved are reused rather than re-created.
+  // ── Payout details (manual payouts) ─────────────────────────────────────────
+  // No Razorpay Route: customer payments settle into the platform's own
+  // Razorpay account, and astrologers are paid out manually after
+  // reconciliation. This only stores where that payout should go.
 
-  async startBankOnboarding(userId: string, dto: CreateRazorpayAccountDto) {
+  async savePayoutDetails(userId: string, dto: SavePayoutDetailsDto) {
     const user = await this.userRepository.findById(userId)
     if (!user) throw NotFoundError('User not found')
+    if (!user.isAstrologer) throw BadRequestError('Only astrologers can add payout details')
 
-    // Email typed into the bank-onboarding form doubles as the user's
-    // profile email — keep users.email in sync whenever it differs.
-    if (dto.email !== user.email) {
-      try {
-        await this.userRepository.updateEmail(userId, dto.email)
-      } catch (err) {
-        if (err instanceof Error && 'code' in err && err.code === '23505') {
-          throw ConflictError('This email is already in use by another account')
-        }
-        throw err
-      }
-    }
-
-    let profile = await this.userRepository.ensureAstrologerProfile(userId)
-
-    // Step 1 — account (only if not already created for this astrologer).
-    let accountId = profile.razorpayAccountId
-    if (!accountId) {
-      const referenceId = generateRazorpayReferenceId()
-      const account = await createRazorpayAccount({
-        email: dto.email,
-        phone: dto.phone,
-        legal_business_name: dto.legalBusinessName,
-        business_type: dto.businessType,
-        contact_name: dto.contactName ?? user.name ?? dto.email,
-        reference_id: referenceId,
-        profile: {
-          category: dto.category,
-          subcategory: dto.subcategory,
-          addresses: {
-            registered: {
-              street1: dto.address.street1,
-              street2: dto.address.street2,
-              city: dto.address.city,
-              state: dto.address.state,
-              postal_code: dto.address.postalCode,
-              country: dto.address.country,
-            },
-          },
-        },
-      })
-      profile = (await this.userRepository.saveRazorpayAccount(userId, {
-        razorpayAccountId: account.id,
-        razorpayAccountStatus: account.status,
-        razorpayReferenceId: referenceId,
-        razorpayAccountResponse: account,
-      }))!
-      accountId = account.id
-    }
-
-    // Step 2 — Route product (only if not already requested).
-    let productId = profile.razorpayProductId
-    if (!productId) {
-      const product = await requestRouteProduct(accountId)
-      profile = (await this.userRepository.saveRazorpayProduct(userId, {
-        razorpayProductId: product.id,
-        razorpayProductStatus: product.activation_status,
-        razorpayProductResponse: product,
-      }))!
-      productId = product.id
-    }
-
-    // Step 3 — stakeholder (KYC — PAN + contact), only once.
-    if (!profile.razorpayStakeholderId) {
-      const stakeholder = await createStakeholder(accountId, {
-        name: dto.contactName ?? user.name ?? dto.email,
-        email: dto.email,
-        relationship: { director: true },
-        kyc: { pan: dto.pan },
-      })
-      profile = (await this.userRepository.saveRazorpayStakeholder(userId, {
-        razorpayStakeholderId: stakeholder.id,
-        razorpayStakeholderResponse: stakeholder,
-      }))!
-    }
-
-    // Step 4 — documents. Only runs when the caller actually sent some this
-    // call. A caller without documents ready yet can complete the earlier
-    // steps now and re-call this same endpoint later, once ImageKit URLs
-    // exist, to attach them.
-    const documentsUploaded: string[] = []
-    if (dto.documents?.length) {
-      const uploadedByType: Record<string, unknown> = {}
-      for (const doc of dto.documents) {
-        uploadedByType[doc.type] = await uploadAccountDocument(accountId, doc.type, doc.url)
-        documentsUploaded.push(doc.type)
-      }
-      await this.userRepository.saveRazorpayDocuments(userId, uploadedByType)
-    }
-
-    return {
-      accountId,
-      productId,
-      status: profile.razorpayProductStatus ?? profile.razorpayAccountStatus,
-      requirements:
-        (profile.razorpayProductResponse as { requirements?: unknown[] } | null)?.requirements ?? [],
-      documentsUploaded,
-    }
+    const profile = await this.userRepository.savePayoutDetails(userId, dto)
+    return toPayoutSummary(profile)
   }
 
-  // POST /users/me/bank-onboarding/bank-details — separate step: submits the
-  // settlements (bank account) block against the Route product created above.
-  async submitBankDetails(userId: string, dto: SubmitBankDetailsDto) {
+  async getPayoutDetails(userId: string) {
     const profile = await this.userRepository.findAstrologerApplication(userId)
-    if (!profile?.razorpayAccountId || !profile.razorpayProductId) {
-      throw NotFoundError('Bank onboarding has not been started for this astrologer yet')
+    if (!profile?.payoutDetails) {
+      throw NotFoundError('Payout details have not been added yet')
     }
-
-    const product = await updateRouteProductSettlements(
-      profile.razorpayAccountId,
-      profile.razorpayProductId,
-      {
-        account_number: dto.accountNumber,
-        ifsc_code: dto.ifscCode,
-        beneficiary_name: dto.beneficiaryName,
-      },
-    )
-
-    return this.userRepository.saveRazorpayProduct(userId, {
-      razorpayProductId: product.id,
-      razorpayProductStatus: product.activation_status,
-      razorpayProductResponse: product,
-    })
+    return toPayoutSummary(profile)
   }
-
-  // GET /users/me/bank-onboarding — live status pulled straight from
-  // Razorpay, keyed off the account id we saved for THIS user — never
-  // accepts an account id from the caller, so one user can't probe
-  // another's account.
-  async getBankOnboardingStatus(userId: string) {
-    const profile = await this.userRepository.findAstrologerApplication(userId)
-
-    if (!profile?.razorpayAccountId) {
-      throw NotFoundError('Bank onboarding has not been started for this astrologer yet')
-    }
-
-    return getRazorpayAccount(profile.razorpayAccountId)
-  }
-
-  // ── Cashfree Easy Split vendor onboarding (commented out during the
-  // Razorpay rollback — kept, not deleted, for a quick re-migration) ──
-  // async startBankOnboarding(userId: string, dto: CreateCashfreeVendorDto) { ... }
-  // async getBankOnboardingStatus(userId: string) { ... getVendor(...) ... }
 
   // ── Phone verification (Google-login users, during onboarding) ─────────────
   // Google-login accounts have no phone on signup. This lets them add +
@@ -339,5 +187,26 @@ export class UserService {
     if (!updatedUser) throw NotFoundError('User not found')
 
     return updatedUser
+  }
+}
+
+// Masked view sent back to the astrologer's own app — the full account
+// number / PAN only ever go in (and to the admin panel for payouts).
+function toPayoutSummary(profile: {
+  payoutMethod: string | null
+  payoutDetails: SavePayoutDetailsDto | null
+  payoutDetailsUpdatedAt: Date | null
+}) {
+  const d = profile.payoutDetails!
+  const mask = (v: string) => `${'•'.repeat(Math.max(0, v.length - 4))}${v.slice(-4)}`
+  return {
+    method: profile.payoutMethod,
+    contactName: d.contactName,
+    beneficiaryName: (d.bank ?? d.upi)?.beneficiaryName ?? null,
+    accountNumber: d.bank ? mask(d.bank.accountNumber) : null,
+    ifscCode: d.bank?.ifscCode ?? null,
+    vpa: d.upi?.vpa ?? null,
+    pan: mask(d.pan),
+    updatedAt: profile.payoutDetailsUpdatedAt,
   }
 }

@@ -99,8 +99,24 @@ export const astrologerProfiles = pgTable('astrologer_profiles', {
   // Pricing (default — services mein override hoga)
   basePrice:        numeric('base_price', { precision: 10, scale: 2 }),
 
-  // ── Razorpay Route — active again (Cashfree migration rolled back) ──
-  razorpayAccountId:       varchar('razorpay_account_id', { length: 64 }).unique(),
+  // ── Payout details (manual payouts) ──
+  // No Razorpay Route: all customer payments settle into the platform's own
+  // Razorpay account and astrologers are paid out manually after
+  // reconciliation. These columns only record where to send that payout.
+  // Sensitive (bank account / PAN) — never expose on public profile APIs.
+  payoutMethod:          varchar('payout_method', { length: 8 }),   // 'bank' | 'upi'
+  payoutDetails:         jsonb('payout_details').$type<{
+    contactName: string
+    phone: string
+    pan: string
+    bank?: { accountNumber: string; ifscCode: string; beneficiaryName: string }
+    upi?: { vpa: string; beneficiaryName: string }
+  }>(),
+  payoutDetailsUpdatedAt: timestamp('payout_details_updated_at', { withTimezone: true }),
+
+  // ── Legacy Razorpay Route columns — NO LONGER USED (Route removed). Left in
+  // place so existing data isn't dropped by a migration; safe to delete later.
+  razorpayAccountId:      varchar('razorpay_account_id', { length: 64 }).unique(),
   razorpayAccountStatus:   varchar('razorpay_account_status', { length: 32 }),
   razorpayReferenceId:     varchar('razorpay_reference_id', { length: 128 }),
   razorpayAccountResponse: jsonb('razorpay_account_response').$type<any>(),

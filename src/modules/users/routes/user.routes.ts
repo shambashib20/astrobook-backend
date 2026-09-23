@@ -120,22 +120,12 @@ export async function userRoutes(app: FastifyInstance) {
               bio: { type: ['string', 'null'] },
               createdAt: { type: 'string' },
               updatedAt: { type: 'string' },
-              // Additive fields — old clients that don't read these keep
-              // working unchanged. null for non-astrologers and for
-              // astrologers who haven't started bank onboarding yet.
-              // IMPORTANT: Fastify's response schema silently strips any
-              // property the service returns that isn't listed here
-              // (fast-json-stringify only serializes declared properties)
-              // — this is exactly why these fields must be declared, not
-              // just returned from the service.
-              razorpayAccountId: { type: ['string', 'null'] },
-              razorpayAccountStatus: { type: ['string', 'null'] },
-              razorpayProductId: { type: ['string', 'null'] },
-              razorpayProductStatus: { type: ['string', 'null'] },
-              // Cashfree fields — commented out during the Razorpay
-              // rollback, kept for a quick re-migration.
-              // cashfreeVendorId: { type: ['string', 'null'] },
-              // cashfreeVendorStatus: { type: ['string', 'null'] },
+              // 'bank' | 'upi' once an astrologer has saved payout details,
+              // null otherwise. IMPORTANT: Fastify's response schema silently
+              // strips any property the service returns that isn't listed
+              // here (fast-json-stringify only serializes declared
+              // properties) — so it must be declared, not just returned.
+              payoutMethod: { type: ['string', 'null'] },
             },
           },
         },
@@ -256,75 +246,43 @@ export async function userRoutes(app: FastifyInstance) {
     userController.getAstrologerApplicationStatus,
   )
 
-  // POST /users/me/bank-onboarding — Razorpay Route account → product →
-  // stakeholder (KYC), documents optional in the same call. Settlements
-  // (bank details) are a separate step — see /me/bank-onboarding/bank-details.
+  // POST /users/me/bank-onboarding — saves the astrologer's payout details
+  // (bank account OR UPI) in our DB. No Razorpay Route: all payments land in
+  // the platform's Razorpay account and astrologers are paid out manually.
   app.post(
     `${prefix}/me/bank-onboarding`,
     {
       preHandler: [authenticate],
       schema: {
         tags: ['Users'],
-        summary: 'Bank onboarding — Razorpay Route account/product/stakeholder for an astrologer',
+        summary: 'Save payout details (bank or UPI) for manual astrologer payouts',
         security: [{ bearerAuth: [] }],
         body: {
           type: 'object',
-          required: ['email', 'phone', 'legalBusinessName', 'category', 'subcategory', 'address', 'pan'],
+          required: ['contactName', 'phone', 'pan'],
           properties: {
-            email: { type: 'string', format: 'email' },
+            contactName: { type: 'string', minLength: 2, maxLength: 255 },
             phone: {
               type: 'string',
               pattern: '^(\\+91|91)?[6-9]\\d{9}$',
-              description:
-                'Indian mobile number — with or without +91/91 country code (e.g. "9830012345" or "+919830012345")',
+              description: 'Indian mobile number — with or without +91/91 country code',
             },
-            legalBusinessName: { type: 'string', minLength: 2, maxLength: 255 },
-            contactName: { type: 'string', minLength: 2, maxLength: 255 },
-            businessType: {
-              type: 'string',
-              enum: [
-                'individual', 'proprietorship', 'partnership', 'huf', 'private_limited',
-                'public_limited', 'llp', 'ngo', 'trust', 'society', 'not_yet_registered', 'other',
-              ],
-              default: 'individual',
-            },
-            category: { type: 'string' },
-            subcategory: { type: 'string' },
-            address: {
+            pan: { type: 'string', pattern: '^[A-Za-z]{3}P[A-Za-z]\\d{4}[A-Za-z]$' },
+            bank: {
               type: 'object',
-              required: ['street1', 'city', 'state', 'postalCode'],
+              required: ['accountNumber', 'ifscCode', 'beneficiaryName'],
               properties: {
-                street1: { type: 'string' },
-                street2: { type: 'string' },
-                city: { type: 'string' },
-                state: { type: 'string' },
-                postalCode: { type: 'string' },
-                country: { type: 'string', default: 'IN' },
+                accountNumber: { type: 'string', minLength: 5, maxLength: 34 },
+                ifscCode: { type: 'string', pattern: '^[A-Z]{4}0[A-Z0-9]{6}$' },
+                beneficiaryName: { type: 'string', minLength: 2, maxLength: 120 },
               },
             },
-            pan: {
-              type: 'string',
-              pattern: '^[A-Za-z]{3}P[A-Za-z]\\d{4}[A-Za-z]$',
-              description: "Owner's PAN — part of the account's stakeholder KYC",
-            },
-            documents: {
-              type: 'array',
-              description:
-                'Optional — documents already uploaded to storage (e.g. ImageKit). Omit and re-call this same endpoint later once ready.',
-              items: {
-                type: 'object',
-                required: ['url', 'type'],
-                properties: {
-                  url: { type: 'string', format: 'uri' },
-                  type: {
-                    type: 'string',
-                    enum: [
-                      'business_proof_url', 'business_pan_url', 'cancelled_cheque',
-                      'shop_establishment_certificate', 'gst_certificate', 'msme_certificate',
-                      'form_12_a_url', 'form_80g_url',
-                    ],
-                  },
-                },
+            upi: {
+              type: 'object',
+              required: ['vpa', 'beneficiaryName'],
+              properties: {
+                vpa: { type: 'string', minLength: 3, maxLength: 320 },
+                beneficiaryName: { type: 'string', minLength: 2, maxLength: 120 },
               },
             },
           },
@@ -334,14 +292,17 @@ export async function userRoutes(app: FastifyInstance) {
             type: 'object',
             properties: {
               message: { type: 'string' },
-              account: {
+              payout: {
                 type: 'object',
                 properties: {
-                  accountId: { type: 'string' },
-                  productId: { type: ['string', 'null'] },
-                  status: { type: ['string', 'null'] },
-                  requirements: { type: 'array' },
-                  documentsUploaded: { type: 'array', items: { type: 'string' } },
+                  method: { type: 'string' },
+                  contactName: { type: 'string' },
+                  beneficiaryName: { type: ['string', 'null'] },
+                  accountNumber: { type: ['string', 'null'] },
+                  ifscCode: { type: ['string', 'null'] },
+                  vpa: { type: ['string', 'null'] },
+                  pan: { type: 'string' },
+                  updatedAt: { type: ['string', 'null'] },
                 },
               },
             },
@@ -349,30 +310,7 @@ export async function userRoutes(app: FastifyInstance) {
         },
       },
     },
-    userController.startBankOnboarding,
-  )
-
-  // POST /users/me/bank-onboarding/bank-details
-  app.post(
-    `${prefix}/me/bank-onboarding/bank-details`,
-    {
-      preHandler: [authenticate],
-      schema: {
-        tags: ['Users'],
-        summary: 'Submit settlements (bank account) details against the Route product',
-        security: [{ bearerAuth: [] }],
-        body: {
-          type: 'object',
-          required: ['accountNumber', 'ifscCode', 'beneficiaryName'],
-          properties: {
-            accountNumber: { type: 'string', minLength: 5, maxLength: 34 },
-            ifscCode: { type: 'string', pattern: '^[A-Z]{4}0[A-Z0-9]{6}$' },
-            beneficiaryName: { type: 'string', minLength: 2, maxLength: 120 },
-          },
-        },
-      },
-    },
-    userController.submitBankDetails,
+    userController.savePayoutDetails,
   )
 
   // POST /users/me/phone/send-otp
@@ -462,36 +400,30 @@ export async function userRoutes(app: FastifyInstance) {
     userController.verifyPhoneOtp,
   )
 
-  // GET /users/me/bank-onboarding — live account details from Razorpay
+  // GET /users/me/bank-onboarding — saved payout details (masked)
   app.get(
     `${prefix}/me/bank-onboarding`,
     {
       preHandler: [authenticate],
       schema: {
         tags: ['Users'],
-        summary: "Fetch the logged-in astrologer's live Razorpay account details",
+        summary: "Fetch the logged-in astrologer's saved payout details (masked)",
         security: [{ bearerAuth: [] }],
         response: {
           200: {
             type: 'object',
             properties: {
-              account: {
+              payout: {
                 type: 'object',
-                additionalProperties: true,
                 properties: {
-                  id: { type: 'string' },
-                  type: { type: 'string' },
-                  status: { type: 'string' },
-                  email: { type: 'string' },
-                  phone: { type: 'string' },
-                  contact_name: { type: 'string' },
-                  reference_id: { type: 'string' },
-                  business_type: { type: 'string' },
-                  legal_business_name: { type: 'string' },
-                  customer_facing_business_name: { type: 'string' },
-                  created_at: { type: 'number' },
-                  profile: { type: 'object', additionalProperties: true },
-                  notes: { type: 'array' },
+                  method: { type: 'string' },
+                  contactName: { type: 'string' },
+                  beneficiaryName: { type: ['string', 'null'] },
+                  accountNumber: { type: ['string', 'null'] },
+                  ifscCode: { type: ['string', 'null'] },
+                  vpa: { type: ['string', 'null'] },
+                  pan: { type: 'string' },
+                  updatedAt: { type: ['string', 'null'] },
                 },
               },
             },
@@ -499,6 +431,6 @@ export async function userRoutes(app: FastifyInstance) {
         },
       },
     },
-    userController.getBankOnboardingStatus,
+    userController.getPayoutDetails,
   )
 }
