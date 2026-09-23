@@ -32,10 +32,9 @@ export type UpdateUserRoleDto = z.infer<typeof UpdateUserRoleSchema>
 export const ListAstrologersQuerySchema = PaginationQuerySchema.extend({
   search: z.string().trim().optional(),
   status: z.enum(['pending', 'approved', 'rejected']).optional(),
-  // Cashfree Easy Split reconciliation filter — 'onboarded' = has a
-  // cashfreeVendorId on file, 'not_onboarded' = doesn't yet. Cached from
-  // our own DB (not a live Cashfree call), matching the rest of this list.
-  cashfreeStatus: z.enum(['onboarded', 'not_onboarded']).optional(),
+  // Cashfree Easy Split reconciliation filter — commented out during the
+  // Razorpay rollback (kept, not deleted, for a quick re-migration).
+  // cashfreeStatus: z.enum(['onboarded', 'not_onboarded']).optional(),
 })
 export type ListAstrologersQueryDto = z.infer<typeof ListAstrologersQuerySchema>
 

@@ -213,17 +213,16 @@ export async function adminRoutes(app: FastifyInstance) {
       preHandler: guard,
       schema: {
         tags: ['Admin'],
-        summary: 'List astrologers — filter by verification status and/or Cashfree onboarding state',
+        summary: 'List astrologers — filter by verification status',
         security: [{ bearerAuth: [] }],
         querystring: {
           type: 'object',
           properties: {
             search: { type: 'string' },
             status: { type: 'string', enum: ['pending', 'approved', 'rejected'] },
-            // Reconciliation filter — cached cashfreeVendorId presence,
-            // not a live Cashfree call. 'onboarded' = has a vendor on
-            // file, 'not_onboarded' = doesn't yet.
-            cashfreeStatus: { type: 'string', enum: ['onboarded', 'not_onboarded'] },
+            // Cashfree reconciliation filter — commented out during the
+            // Razorpay rollback (kept, not deleted, for a quick re-migration).
+            // cashfreeStatus: { type: 'string', enum: ['onboarded', 'not_onboarded'] },
             page: { type: 'integer', minimum: 1 },
             limit: { type: 'integer', minimum: 1, maximum: 100 },
           },
@@ -247,23 +246,9 @@ export async function adminRoutes(app: FastifyInstance) {
     adminController.getAstrologer,
   )
 
-  // POST /admin/astrologers/:id/cashfree-refresh — pulls live status from
-  // Cashfree for one astrologer's vendor and caches it, for the "Refresh"
-  // action on the reconciliation list (which otherwise reads cached data
-  // only — see GET /admin/astrologers above).
-  app.post(
-    `${prefix}/astrologers/:id/cashfree-refresh`,
-    {
-      preHandler: guard,
-      schema: {
-        tags: ['Admin'],
-        summary: "Refresh one astrologer's Cashfree vendor status from the live API",
-        security: [{ bearerAuth: [] }],
-        params: { type: 'object', required: ['id'], properties: { id: { type: 'string', format: 'uuid' } } },
-      },
-    },
-    adminController.refreshVendorStatus,
-  )
+  // POST /admin/astrologers/:id/cashfree-refresh — commented out during the
+  // Razorpay rollback (kept, not deleted, for a quick re-migration).
+  // app.post(`${prefix}/astrologers/:id/cashfree-refresh`, ..., adminController.refreshVendorStatus)
 
   app.patch(
     `${prefix}/astrologers/:id/documents`,
@@ -307,41 +292,11 @@ export async function adminRoutes(app: FastifyInstance) {
     adminController.updateCommission,
   )
 
-  // GET /admin/payments/refunds-pending — queue of paid-then-cancelled
-  // appointments awaiting an admin's refund decision (see
-  // booking.service.ts::cancelAppointment, which flags these).
-  app.get(
-    `${prefix}/payments/refunds-pending`,
-    {
-      preHandler: guard,
-      schema: {
-        tags: ['Admin'],
-        summary: 'List payments awaiting admin-approved refund',
-        security: [{ bearerAuth: [] }],
-      },
-    },
-    adminController.listPendingRefunds,
-  )
-
-  // POST /admin/payments/:paymentId/refund — actually fires the Cashfree
-  // split-aware refund. Refunds are never automatic on cancel by design.
-  app.post(
-    `${prefix}/payments/:paymentId/refund`,
-    {
-      preHandler: guard,
-      schema: {
-        tags: ['Admin'],
-        summary: 'Approve + process a split-aware Cashfree refund for a cancelled, paid appointment',
-        security: [{ bearerAuth: [] }],
-        params: {
-          type: 'object',
-          required: ['paymentId'],
-          properties: { paymentId: { type: 'string', format: 'uuid' } },
-        },
-      },
-    },
-    adminController.approveRefund,
-  )
+  // GET /admin/payments/refunds-pending + POST /admin/payments/:paymentId/refund
+  // — Cashfree split-aware refund flow, commented out during the Razorpay
+  // rollback (kept, not deleted, for a quick re-migration).
+  // app.get(`${prefix}/payments/refunds-pending`, ..., adminController.listPendingRefunds)
+  // app.post(`${prefix}/payments/:paymentId/refund`, ..., adminController.approveRefund)
 
   app.patch(
     `${prefix}/astrologers/:id/verification`,

@@ -99,30 +99,25 @@ export const astrologerProfiles = pgTable('astrologer_profiles', {
   // Pricing (default — services mein override hoga)
   basePrice:        numeric('base_price', { precision: 10, scale: 2 }),
 
-  // ── Razorpay Route (commented out during the Cashfree migration — kept,
-  // not deleted, so this is a quick uncomment-and-migrate-back rollback) ──
-  // razorpayAccountId:       varchar('razorpay_account_id', { length: 64 }).unique(),
-  // razorpayAccountStatus:   varchar('razorpay_account_status', { length: 32 }),
-  // razorpayReferenceId:     varchar('razorpay_reference_id', { length: 128 }),
-  // razorpayAccountResponse: jsonb('razorpay_account_response').$type<any>(),
-  // razorpayAccountCreatedAt: timestamp('razorpay_account_created_at', { withTimezone: true }),
-  // razorpayProductId:       varchar('razorpay_product_id', { length: 64 }).unique(),
-  // razorpayProductStatus:   varchar('razorpay_product_status', { length: 32 }),
-  // razorpayProductResponse: jsonb('razorpay_product_response').$type<any>(),
-  // razorpayStakeholderId:       varchar('razorpay_stakeholder_id', { length: 64 }),
-  // razorpayStakeholderResponse: jsonb('razorpay_stakeholder_response').$type<any>(),
-  // razorpayDocumentsResponse: jsonb('razorpay_documents_response').$type<any>(),
+  // ── Razorpay Route — active again (Cashfree migration rolled back) ──
+  razorpayAccountId:       varchar('razorpay_account_id', { length: 64 }).unique(),
+  razorpayAccountStatus:   varchar('razorpay_account_status', { length: 32 }),
+  razorpayReferenceId:     varchar('razorpay_reference_id', { length: 128 }),
+  razorpayAccountResponse: jsonb('razorpay_account_response').$type<any>(),
+  razorpayAccountCreatedAt: timestamp('razorpay_account_created_at', { withTimezone: true }),
+  razorpayProductId:       varchar('razorpay_product_id', { length: 64 }).unique(),
+  razorpayProductStatus:   varchar('razorpay_product_status', { length: 32 }),
+  razorpayProductResponse: jsonb('razorpay_product_response').$type<any>(),
+  razorpayStakeholderId:       varchar('razorpay_stakeholder_id', { length: 64 }),
+  razorpayStakeholderResponse: jsonb('razorpay_stakeholder_response').$type<any>(),
+  razorpayDocumentsResponse: jsonb('razorpay_documents_response').$type<any>(),
 
-  // Cashfree Easy Split vendor — astrologer ko split payout lene ke liye
-  // Cashfree ke saath onboard hona padta hai. vendor_id hum khud generate
-  // karte hain (`ast_<astrologerId>`), isliye Razorpay wale alag
-  // "reference_id" bookkeeping ki zaroorat nahi — vendor create/update dono
-  // hi single call hain (bank/UPI + KYC ek saath), Route ke 4-step flow ke
-  // saamne bahut simpler.
-  cashfreeVendorId:        varchar('cashfree_vendor_id', { length: 64 }).unique(),
-  cashfreeVendorStatus:    varchar('cashfree_vendor_status', { length: 32 }),
-  cashfreeVendorResponse:  jsonb('cashfree_vendor_response').$type<any>(),
-  cashfreeVendorCreatedAt: timestamp('cashfree_vendor_created_at', { withTimezone: true }),
+  // ── Cashfree Easy Split vendor (commented out during the Razorpay
+  // rollback — kept, not deleted, for a quick re-migration) ──
+  // cashfreeVendorId:        varchar('cashfree_vendor_id', { length: 64 }).unique(),
+  // cashfreeVendorStatus:    varchar('cashfree_vendor_status', { length: 32 }),
+  // cashfreeVendorResponse:  jsonb('cashfree_vendor_response').$type<any>(),
+  // cashfreeVendorCreatedAt: timestamp('cashfree_vendor_created_at', { withTimezone: true }),
 
   meta:             jsonb('meta').$type<any>(),
   createdAt:        timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),

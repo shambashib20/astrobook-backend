@@ -17,12 +17,10 @@ export const CartCheckoutCreateOrderSchema = z.object({
   cartItemIds: z.array(z.string().uuid()).min(1, 'Kam se kam ek item select karo'),
 })
 
-// Cashfree's hosted checkout doesn't hand the client a signed payment id
-// (razorpayOrderId/PaymentId/Signature — commented out during the
-// migration) — confirmation is webhook-driven server-side. The client just
-// tells us which order to re-check the status of.
 export const CartCheckoutVerifySchema = z.object({
-  orderId: z.string(),
+  razorpayOrderId: z.string(),
+  razorpayPaymentId: z.string(),
+  razorpaySignature: z.string(),
 })
 
 export type AddCartItemDto = z.infer<typeof AddCartItemSchema>

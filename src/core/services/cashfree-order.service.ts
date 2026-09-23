@@ -1,3 +1,8 @@
+// Commented out during the Razorpay rollback (kept, not deleted, as a
+// quick re-migration). env.CASHFREE_* no longer exist on `env` (see
+// src/config/env.ts), so this whole file is block-commented to stay out
+// of the TypeScript build until uncommented.
+/*
 import crypto from 'crypto'
 import axios, { isAxiosError } from 'axios'
 import { env } from '@/config/env'
@@ -155,3 +160,5 @@ export function verifyWebhookSignature(rawBody: string, timestamp: string, signa
   if (expectedBuf.length !== actualBuf.length) return false
   return crypto.timingSafeEqual(expectedBuf, actualBuf)
 }
+
+*/
