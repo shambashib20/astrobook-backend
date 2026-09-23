@@ -253,6 +253,34 @@ export class BookingService {
     return updated!
   }
 
+  // ── Renew Agora Token ──────────────────────────────────────────────────────
+  //
+  // Token 1 hour (3600s) ke baad expire ho jaata hai, lekin service variants
+  // 90 min tak ke hote hain — isliye lambe sessions mein token beech mein hi
+  // expire ho sakta tha aur call drop ho jaati thi. App `onTokenPrivilegeWillExpire`
+  // (expiry se ~30s pehle) pe ye call karta hai, hum same channel ka naya
+  // token bana ke de dete hain — engine.renewToken() se call bina disconnect
+  // ke chalti rehti hai.
+
+  async renewAgoraToken(appointmentId: string, requesterId: string) {
+    const appointment = await this.appointmentRepository.findById(appointmentId)
+    if (!appointment) throw NotFoundError('Appointment not found')
+
+    if (appointment.userId !== requesterId && appointment.astrologerId !== requesterId) {
+      throw ForbiddenError('You are not part of this session')
+    }
+
+    if (appointment.status !== 'ongoing') {
+      throw BadRequestError('Session is not ongoing — cannot renew token')
+    }
+
+    // Channel naam appointmentId se hi deterministically banta hai
+    // (agora.service.ts dekho), isliye naya token bhi same channel ke liye
+    // banega — dono party same channel pe rehte hain, koi rejoin nahi chahiye.
+    const { channel, token } = this.agoraService.generateToken(appointmentId)
+    return { channel, token }
+  }
+
   // ── Get Appointments ───────────────────────────────────────────────────────
 
   async getMyAppointments(userId: string) {

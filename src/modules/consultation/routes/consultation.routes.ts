@@ -255,6 +255,20 @@ export async function consultationRoutes(app: FastifyInstance) {
     bookingController.endSession,
   )
 
+  // Renew Agora token — 1 hour expiry se pehle app khud call karta hai
+  // (onTokenPrivilegeWillExpire), taaki lambe (90-min) sessions beech mein
+  // na katein
+  app.post(
+    '/consultation/appointments/:id/renew-token',
+    {
+      preHandler: [authenticate],
+      schema: {
+        params: { type: 'object', properties: { id: { type: 'string' } } },
+      },
+    },
+    bookingController.renewAgoraToken,
+  )
+
   // ═══════════════════════════════════════════════════════════════════════════
   // SERVICE REQUEST ROUTES (mid-session upsell)
   // ═══════════════════════════════════════════════════════════════════════════

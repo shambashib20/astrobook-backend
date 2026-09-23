@@ -54,4 +54,12 @@ export class BookingController {
     const appointment = await this.bookingService.endSession(id, userId)
     return reply.status(200).send({ success: true, data: { appointment } })
   }
+
+  // POST /consultation/appointments/:id/renew-token
+  renewAgoraToken = async (request: FastifyRequest, reply: FastifyReply) => {
+    const { userId } = request.user as { userId: string }
+    const { id } = request.params as { id: string }
+    const agora = await this.bookingService.renewAgoraToken(id, userId)
+    return reply.status(200).send({ success: true, data: { agora } })
+  }
 }
