@@ -25,6 +25,7 @@ export const appointmentStatusEnum = pgEnum('appointment_status', [
   'ongoing', // session chal raha hai
   'completed', // session khatam
   'cancelled', // cancel hua
+  'missed', // scheduled time nikal gaya, astrologer kabhi join hi nahi kiya
 ])
 
 export const bundleStatusEnum = pgEnum('bundle_status', [
@@ -33,7 +34,12 @@ export const bundleStatusEnum = pgEnum('bundle_status', [
   'completed', // sab khatam
 ])
 
-export const paymentStatusEnum = pgEnum('payment_status', ['pending', 'success', 'failed'])
+export const paymentStatusEnum = pgEnum('payment_status', [
+  'pending',
+  'success',
+  'failed',
+  'refunded',
+])
 
 export const serviceRequestStatusEnum = pgEnum('service_request_status', [
   'pending',

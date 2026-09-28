@@ -29,6 +29,23 @@ export const NOTIFICATION_CLEANUP_INTERVAL_MS = 6 * 60 * 60 * 1000
 export const SETTLEMENT_JOB = 'vendor-settlement'
 export const SETTLEMENT_INTERVAL_MS = 24 * 60 * 60 * 1000
 
+// Abandoned "pending" bookings — payment kabhi shuru hi nahi hui ya beech
+// mein chhod di, aur ab itni purani ho chuki hain ki genuine slow-payment
+// nahi maani ja sakti. Har 5 min mein check karte hain, 20 min se purani
+// pending bookings ko cancel kar dete hain (slot release ho jaata hai).
+export const STALE_PENDING_CLEANUP_JOB = 'stale-pending-cleanup'
+export const STALE_PENDING_CLEANUP_INTERVAL_MS = 5 * 60 * 1000
+export const PENDING_BOOKING_TIMEOUT_MS = 20 * 60 * 1000
+
+// Missed sessions — booking 'confirmed' thi, payment ho chuka tha, lekin
+// astrologer kabhi join hi nahi kiya (status kabhi 'ongoing' nahi bana).
+// Scheduled end + grace period ke baad bhi 'confirmed' hai to astrologer
+// no-show maana jaata hai — refund + notify. Grace period isliye taaki
+// astrologer ka join request in-flight ho to galti se missed na ban jaaye.
+export const MISSED_SESSION_JOB = 'missed-session-refund'
+export const MISSED_SESSION_SWEEP_INTERVAL_MS = 5 * 60 * 1000
+export const MISSED_SESSION_GRACE_MS = 5 * 60 * 1000
+
 type JobState = {
   lastRunAt: Date | null
   lastSuccessAt: Date | null

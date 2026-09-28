@@ -100,4 +100,17 @@ export async function paymentRoutes(app: FastifyInstance) {
   // rollback — kept, not deleted, for a quick re-migration) ──
   // app.get('/payments/cashfree-return', ...)
   // await app.register(async (webhookApp) => { ... POST /payments/webhooks/cashfree ... })
+
+  // POST /payments/webhooks/razorpay — no `authenticate` preHandler, Razorpay
+  // khud call karta hai. Security signature check controller ke andar hai.
+  app.post(
+    '/payments/webhooks/razorpay',
+    {
+      schema: {
+        tags: ['Payment'],
+        summary: 'Razorpay webhook — server-to-server payment status updates',
+      },
+    },
+    paymentController.razorpayWebhook,
+  )
 }

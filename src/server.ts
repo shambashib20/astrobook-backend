@@ -4,16 +4,26 @@ import { closeDb, getDb } from './core/database/client'
 import {
   NOTIFICATION_CLEANUP_INTERVAL_MS,
   NOTIFICATION_CLEANUP_JOB,
+  STALE_PENDING_CLEANUP_INTERVAL_MS,
+  STALE_PENDING_CLEANUP_JOB,
+  MISSED_SESSION_SWEEP_INTERVAL_MS,
+  MISSED_SESSION_JOB,
   recordCronError,
   recordCronRun,
   recordCronSuccess,
 } from './core/utils/cron-heartbeat'
 import { pushLog } from './core/utils/log-buffer'
 import { AppointmentRepository } from './modules/consultation/repositories/appointment.repository'
+import { ServiceRepository } from './modules/consultation/repositories/service.repository'
+import { AvailabilityRepository } from './modules/consultation/repositories/availability.repository'
+import { PaymentRepository } from './modules/payment/repositories/payment.repositary'
+import { PaymentService } from './modules/payment/service/payment.service'
+import { ConsultationService } from './modules/consultation/services/consultation.service'
+import { BookingService } from './modules/consultation/services/booking.service'
+import { AgoraService } from './modules/consultation/services/agora.service'
 import { PushNotificationService } from './core/services/push-notification.service'
 import { NotificationsRepository } from './modules/notifications/repositories/notifications.repository'
 import { NotificationsService } from './modules/notifications/services/notifications.service'
-// import { runMonthlySettlement } from './core/services/vendor-settlement-runner'
 import { SessionSweepScheduler } from './core/services/session-sweep-scheduler'
 // Cashfree Easy Split monthly vendor settlement cron — commented out during
 // the Razorpay rollback (kept, not deleted, for a quick re-migration). See
@@ -62,6 +72,67 @@ async function start() {
     }
   }, NOTIFICATION_CLEANUP_INTERVAL_MS)
 
+  // ── Stale pending booking cleanup ──────────────────────────────────────────
+  // Payment kabhi shuru hi nahi hui ya beech mein chhod di gayi — bahut der
+  // tak 'pending' reh gayi booking us slot ko hamesha ke liye lock kar deti
+  // thi (koi cleanup nahi tha pehle). Har 5 min check, 20 min se purani
+  // pending bookings cancel ho jaati hain, slot release hota hai.
+  const availabilityRepo = new AvailabilityRepository(getDb())
+  const serviceRepo = new ServiceRepository(getDb())
+  const paymentRepo = new PaymentRepository(getDb())
+  const consultationServiceForCleanup = new ConsultationService(
+    serviceRepo,
+    availabilityRepo,
+    appointmentRepo,
+  )
+  const bookingServiceForCleanup = new BookingService(
+    appointmentRepo,
+    consultationServiceForCleanup,
+    new AgoraService(),
+    pushNotificationService,
+    paymentRepo,
+  )
+  const stalePendingCleanupInterval = setInterval(async () => {
+    recordCronRun(STALE_PENDING_CLEANUP_JOB)
+    try {
+      const count = await bookingServiceForCleanup.cancelStalePendingBookings()
+      if (count > 0) {
+        app.log.info({ count }, 'Cancelled stale pending bookings')
+      }
+      recordCronSuccess(STALE_PENDING_CLEANUP_JOB)
+    } catch (err) {
+      app.log.error(err, 'Stale pending booking cleanup failed')
+      recordCronError(STALE_PENDING_CLEANUP_JOB, err)
+      pushLog('cron', 'error', 'Stale pending booking cleanup failed', {
+        error: err instanceof Error ? err.message : String(err),
+      })
+    }
+  }, STALE_PENDING_CLEANUP_INTERVAL_MS)
+
+  // ── Missed session refund ──────────────────────────────────────────────────
+  // Booking 'confirmed' thi (payment ho chuka), lekin astrologer scheduled
+  // window mein kabhi join hi nahi kiya. Pehle aisi bookings hamesha ke
+  // liye 'confirmed' hi reh jaati thin — na refund hota, na user ko pata
+  // chalta. Har 5 min check, jo bhi session apne end-time + 5 min grace ke
+  // baad bhi 'confirmed' hai, wo automatically refund ho jaata hai.
+  const paymentServiceForSweep = new PaymentService(paymentRepo, appointmentRepo, pushNotificationService)
+  const missedSessionInterval = setInterval(async () => {
+    recordCronRun(MISSED_SESSION_JOB)
+    try {
+      const count = await paymentServiceForSweep.refundMissedSessions()
+      if (count > 0) {
+        app.log.info({ count }, 'Refunded missed sessions')
+      }
+      recordCronSuccess(MISSED_SESSION_JOB)
+    } catch (err) {
+      app.log.error(err, 'Missed session refund sweep failed')
+      recordCronError(MISSED_SESSION_JOB, err)
+      pushLog('cron', 'error', 'Missed session refund sweep failed', {
+        error: err instanceof Error ? err.message : String(err),
+      })
+    }
+  }, MISSED_SESSION_SWEEP_INTERVAL_MS)
+
   // ── Astrologer payout settlement (Cashfree Easy Split — the 8th of every
   // month) — commented out during the Razorpay rollback (kept, not deleted,
   // for a quick re-migration). Razorpay Route settles per-transfer, not on
@@ -90,6 +161,8 @@ async function start() {
     app.log.info(`Received ${signal}. Shutting down gracefully...`)
     sessionSweep.stop()
     clearInterval(notificationCleanupInterval)
+    clearInterval(stalePendingCleanupInterval)
+    clearInterval(missedSessionInterval)
     // clearInterval(settlementInterval)
 
     try {

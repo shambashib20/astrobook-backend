@@ -42,6 +42,25 @@ export async function buildApp() {
     disableRequestLogging: true,
   })
 
+  // Webhook signature verification (Razorpay) HMAC raw request body pe
+  // chalti hai, parsed JSON object pe nahi — isliye default JSON parser ko
+  // override karke raw string bhi stash karte hain (request.rawBody).
+  // Baaki sab routes ke liye behavior bilkul same hai, bas ye extra field
+  // milta hai.
+  app.addContentTypeParser(
+    'application/json',
+    { parseAs: 'string' },
+    (request, body, done) => {
+      ;(request as any).rawBody = body
+      try {
+        const json = (body as string).length ? JSON.parse(body as string) : {}
+        done(null, json)
+      } catch (err) {
+        done(err as Error, undefined)
+      }
+    },
+  )
+
   // Koi bhi successful write request (booking, payment webhook, session
   // start/extend, reschedule...) appointments badal sakti hai — session sweep
   // ko bolo ki agla reminder / session-end ka time dobara dekh le. Us waqt DB

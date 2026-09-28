@@ -26,62 +26,85 @@ export class ServiceRepository {
   // Har service (Basic ho ya normal) ke saath fixed 5 duration variants
   // auto-create karta hai — 10/30/45/60/90 min, default prices ke saath.
   // 30-min wala isDefault=true (user detail page pe pre-selected rehta hai).
-  private async createVariantsForService(serviceId: string) {
+  // `dbOrTx` optional — transaction ke andar se call hoga to `tx` pass hoga,
+  // warna default `this.db` (standalone call, e.g. kahin aur se reuse).
+  private async createVariantsForService(
+    serviceId: string,
+    // Pick<Database, 'insert'> — sirf `insert` method ka shape chahiye,
+    // isliye plain `Database` aur transaction `tx` (jiska poora Database
+    // type nahi hota, sirf query builder methods) dono yahan fit ho jaate
+    // hain bina kisi type-cast ke.
+    dbOrTx: Pick<Database, 'insert'> = this.db,
+  ) {
     const rows = VARIANT_DURATIONS.map((duration) => ({
       serviceId,
       durationMinutes: duration,
       price: VARIANT_DEFAULT_PRICES[duration],
       isDefault: duration === DEFAULT_VARIANT_DURATION,
     }))
-    return this.db.insert(consultationServiceVariants).values(rows).returning()
+    return dbOrTx.insert(consultationServiceVariants).values(rows).returning()
   }
 
   // Astrologer khud ek nayi "normal" service banata hai — koi natural
   // uniqueness key nahi (Premium/Elite tier hata diya), har call ek nayi row.
   // Duration/price ab service-level pe nahi liya jaata — 5 variants
   // auto-create hote hain default prices ke saath.
+  //
+  // Pehle service-insert aur variants-insert do ALAG queries thin, bina
+  // transaction ke — agar service ban jaata aur uske turant baad variants
+  // insert kisi bhi wajah se fail ho jaata (network blip, Neon cold-start
+  // timeout, koi bhi transient error), service DB mein orphaned reh jaati
+  // thi bina variants ke (astrologer ko sirf error dikhta, use pata bhi
+  // nahi chalta ki service actually ban chuki hai). `db.transaction()` mein
+  // wrap karne se ab dono ek hi atomic unit hain — agar variants fail hue,
+  // poora transaction rollback ho jaata hai, service bhi nahi banti.
   async create(astrologerId: string, dto: CreateServiceDto) {
-    const [service] = await this.db
-      .insert(consultationServices)
-      .values({
-        astrologerId,
-        isBasic: false,
-        title: dto.title,
-        shortDescription: dto.shortDescription,
-        coverImage: dto.coverImage,
-        about: dto.about,
-        durationMinutes: DEFAULT_VARIANT_DURATION,
-        price: VARIANT_DEFAULT_PRICES[DEFAULT_VARIANT_DURATION],
-        tags: dto.tags,
-        isActive: true,
-      })
-      .returning()
-    const variants = await this.createVariantsForService(service!.id)
-    return { ...service!, variants }
+    return this.db.transaction(async (tx) => {
+      const [service] = await tx
+        .insert(consultationServices)
+        .values({
+          astrologerId,
+          isBasic: false,
+          title: dto.title,
+          shortDescription: dto.shortDescription,
+          coverImage: dto.coverImage,
+          about: dto.about,
+          durationMinutes: DEFAULT_VARIANT_DURATION,
+          price: VARIANT_DEFAULT_PRICES[DEFAULT_VARIANT_DURATION],
+          tags: dto.tags,
+          isActive: true,
+        })
+        .returning()
+      const variants = await this.createVariantsForService(service!.id, tx)
+      return { ...service!, variants }
+    })
   }
 
   // Platform ka auto-created "Basic" consultancy — admin approval flow
   // (admin module's updateVerification) se call hota hai jab astrologer
   // application approve hoti hai (koi image nahi). Isko bhi 5 variants milte
-  // hain jaisi kisi normal service ko milte hain.
+  // hain jaisi kisi normal service ko milte hain. Yahan bhi same transaction
+  // safety — service aur variants ek saath banenge ya bilkul nahi.
   async createBasic(astrologerId: string) {
-    const [service] = await this.db
-      .insert(consultationServices)
-      .values({
-        astrologerId,
-        isBasic: true,
-        title: BASIC_SERVICE_DEFAULTS.title,
-        shortDescription: BASIC_SERVICE_DEFAULTS.shortDescription,
-        coverImage: null,
-        about: BASIC_SERVICE_DEFAULTS.about,
-        durationMinutes: DEFAULT_VARIANT_DURATION,
-        price: VARIANT_DEFAULT_PRICES[DEFAULT_VARIANT_DURATION],
-        tags: [],
-        isActive: true,
-      })
-      .returning()
-    const variants = await this.createVariantsForService(service!.id)
-    return { ...service!, variants }
+    return this.db.transaction(async (tx) => {
+      const [service] = await tx
+        .insert(consultationServices)
+        .values({
+          astrologerId,
+          isBasic: true,
+          title: BASIC_SERVICE_DEFAULTS.title,
+          shortDescription: BASIC_SERVICE_DEFAULTS.shortDescription,
+          coverImage: null,
+          about: BASIC_SERVICE_DEFAULTS.about,
+          durationMinutes: DEFAULT_VARIANT_DURATION,
+          price: VARIANT_DEFAULT_PRICES[DEFAULT_VARIANT_DURATION],
+          tags: [],
+          isActive: true,
+        })
+        .returning()
+      const variants = await this.createVariantsForService(service!.id, tx)
+      return { ...service!, variants }
+    })
   }
 
   // Service ke basic fields edit karna (title/desc/cover/about/tags) —

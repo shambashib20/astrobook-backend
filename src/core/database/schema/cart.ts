@@ -1,4 +1,4 @@
-import { pgTable, uuid, timestamp, index } from 'drizzle-orm/pg-core'
+import { pgTable, uuid, timestamp, index, unique } from 'drizzle-orm/pg-core'
 import { users } from './users'
 import { consultationServices, consultationServiceVariants } from './consultation'
 
@@ -33,6 +33,18 @@ export const cartItems = pgTable(
   (table) => ({
     // "Get my cart" is the hot path here — filters by userId on every load.
     userIdIdx: index('cart_items_user_id_idx').on(table.userId),
+    // Ek user same service (same astrologer ki same consultancy) ko cart mein
+    // ek hi baar rakh sakta hai — chahe kitni baar "Add to Cart" kare ya
+    // duration/price badal ke firse add kare, row wahi ek rehti hai, sirf
+    // uska variantId update hota hai (PM decision: alag-alag price/duration
+    // wale multiple entries same consultancy ke liye allowed nahi hain).
+    // App-level check (cart.service.ts) already isko enforce karta hai —
+    // yeh DB-level safety net hai taaki koi race condition ya future bug
+    // dobara duplicate rows na bana sake.
+    uniqueUserService: unique('cart_items_user_service_unique').on(
+      table.userId,
+      table.serviceId,
+    ),
   }),
 )
 

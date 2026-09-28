@@ -54,13 +54,29 @@ export class CartService {
       variantId = defaultVariant?.id
     }
 
-    return this.cartRepository.create({
+    // PM decision: same user, same service (same astrologer ki same
+    // consultancy) cart mein sirf EK row honi chahiye — chahe alag duration/
+    // price ke saath "Add to Cart" dobara kyun na kiya jaaye. Naya row banane
+    // ki jagah existing item ka variant hi update kar dete hain (jaisa PM ne
+    // bola — "modify karna hai toh wahi modify karega").
+    const existing = await this.cartRepository.findExisting(userId, dto.serviceId)
+    if (existing) {
+      const updated = await this.cartRepository.updateVariant(
+        existing.id,
+        userId,
+        variantId ?? null,
+      )
+      return { ...updated!, wasAlreadyInCart: true }
+    }
+
+    const created = await this.cartRepository.create({
       userId,
       astrologerId: dto.astrologerId,
       serviceId: dto.serviceId,
       variantId: variantId ?? null,
       scheduledAt: null,
     })
+    return { ...created, wasAlreadyInCart: false }
   }
 
   // Cart list ke saath service details (title, price, duration, coverImage,

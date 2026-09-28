@@ -66,7 +66,7 @@ export class PaymentRepository {
   async updateByOrderId(
     razorpayOrderId: string,
     data: Partial<{
-      status: 'pending' | 'success' | 'failed'
+      status: 'pending' | 'success' | 'failed' | 'refunded'
       razorpayPaymentId: string
       razorpaySignature: string
     }>,
@@ -75,6 +75,19 @@ export class PaymentRepository {
       .update(payments)
       .set({ ...data, updatedAt: sql`now()` })
       .where(eq(payments.razorpayOrderId, razorpayOrderId))
+      .returning()
+    return payment ?? null
+  }
+
+  // Stale-pending-booking cleanup ke liye — agar order create ho chuka tha
+  // (payment row exist karta hai) lekin kabhi paid nahi hua, usse 'failed'
+  // mark karo taaki records clean rahein. Order kabhi bana hi nahi (user
+  // checkout tak pahuncha hi nahi) toh koi row milegi hi nahi — fine, no-op.
+  async markFailedByAppointmentId(appointmentId: string) {
+    const [payment] = await this.db
+      .update(payments)
+      .set({ status: 'failed', updatedAt: sql`now()` })
+      .where(and(eq(payments.appointmentId, appointmentId), eq(payments.status, 'pending')))
       .returning()
     return payment ?? null
   }

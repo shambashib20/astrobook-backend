@@ -78,6 +78,11 @@ const envSchema = z.object({
   RAZORPAY_API_ENDPOINT: z.string().url().default('https://api.razorpay.com'),
   RAZORPAY_API_VERSION_1: z.string().min(1).default('v1'),
   RAZORPAY_API_VERSION_2: z.string().min(1).default('v2'),
+  // Webhook secret — ALAG hai RAZORPAY_KEY_SECRET se. Razorpay Dashboard →
+  // Account & Settings → Webhooks → webhook add karte waqt jo secret set
+  // karoge, wahi yahan. Optional isliye taaki webhook setup se pehle bhi
+  // server chalta rahe — jab tak set nahi hoga, webhook route 501 dega.
+  RAZORPAY_WEBHOOK_SECRET: z.string().min(1).optional(),
 
   // Cashfree Payments (Easy Split) — commented out during the Razorpay
   // rollback (kept, not deleted, for a quick re-migration). Do not remove
