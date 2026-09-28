@@ -83,34 +83,9 @@ export const UserResponseSchema = z.object({
   updatedAt:   z.date(),
 })
 
-// ── Razorpay Route schemas — active again (Cashfree migration rolled back) ──
-const RazorpayAddressSchema = z.object({
-  street1:     z.string().min(1),
-  street2:     z.string().optional(),
-  city:        z.string().min(1),
-  state:       z.string().min(1),
-  postalCode:  z.string().min(1),
-  country:     z.string().length(2).default('IN'),
-})
-export const RazorpayBusinessTypeSchema = z.enum([
-  'individual', 'proprietorship', 'partnership', 'huf', 'private_limited',
-  'public_limited', 'llp', 'ngo', 'trust', 'society', 'not_yet_registered', 'other',
-])
-export type RazorpayBusinessType = z.infer<typeof RazorpayBusinessTypeSchema>
-
-// ── Cashfree Easy Split vendor account_type (commented out during the
-// Razorpay rollback — kept, not deleted, for a quick re-migration) ──
-// export const CashfreeAccountTypeSchema = z.enum([
-//   'Individual', 'Proprietorship', 'Partnership', 'LLP', 'Private Limited',
-//   'Public Limited', 'Trust', 'NGO', 'Society', 'Other',
-// ])
-// export type CashfreeAccountType = z.infer<typeof CashfreeAccountTypeSchema>
-
 // Accepts "9830012345", "+919830012345", or "919830012345" — strips a
 // leading +91/91 country code (if present) before validating the bare
-// 10-digit number. Razorpay always prepends +91 itself on its side (see the
-// sample response: "9830012345" in → "+919830012345" out), so we normalize
-// to the bare form before it goes into the payload.
+// 10-digit number, so it's stored in one normalized form.
 //
 // Length-gated on purpose: a plain length-agnostic `replace(/^\+?91/, '')`
 // would also mis-strip a real bare 10-digit number that happens to start
@@ -127,8 +102,7 @@ const indianMobileSchema = z
   .pipe(z.string().regex(/^[6-9]\d{9}$/, 'Enter a valid 10-digit Indian mobile number'))
 
 // PAN format: 5 letters, 4 digits, 1 letter — the 4th letter encodes holder
-// type (P = individual), matching the stakeholder being this account's
-// individual owner.
+// type (P = individual). Kept on file for TDS / reconciliation of payouts.
 const panSchema = z
   .string()
   // Real PAN structure: 5 letters (4th = holder type, P for individual) +
@@ -136,51 +110,32 @@ const panSchema = z
   .regex(/^[A-Za-z]{3}P[A-Za-z]\d{4}[A-Za-z]$/, 'Invalid PAN')
   .transform((v) => v.toUpperCase())
 
-// ── Razorpay Route document/account schemas — active again (Cashfree
-// migration rolled back) ──
-export const RazorpayDocumentTypeSchema = z.enum([
-  'business_proof_url', 'business_pan_url', 'cancelled_cheque',
-  'shop_establishment_certificate', 'gst_certificate', 'msme_certificate',
-  'form_12_a_url', 'form_80g_url',
-])
-export const CreateRazorpayAccountSchema = z.object({
-  email:              z.string().email(),
-  phone:              indianMobileSchema,
-  legalBusinessName: z.string().min(2).max(255),
-  contactName:        z.string().min(2).max(255).optional(),
-  businessType:       RazorpayBusinessTypeSchema.default('individual'),
-  category:           z.string().min(1),
-  subcategory:        z.string().min(1),
-  address:            RazorpayAddressSchema,
-  pan:                panSchema,
-  documents:          z.array(z.object({ url: z.string().url(), type: RazorpayDocumentTypeSchema })).optional(),
-})
-export type CreateRazorpayAccountDto = z.infer<typeof CreateRazorpayAccountSchema>
-export const SubmitBankDetailsSchema = z.object({
-  accountNumber:   z.string().min(5).max(34),
+// ── Astrologer payout details ───────────────────────────────────────────────
+// No Razorpay Route / linked accounts: every customer payment settles into
+// the platform's own Razorpay account, and astrologers are paid out manually
+// after reconciliation. This just records WHERE to send each astrologer's
+// payout — bank account OR UPI — in our own DB.
+const PayoutBankSchema = z.object({
+  accountNumber:   z.string().regex(/^\d{5,34}$/, 'Invalid account number'),
   ifscCode:        z.string().regex(/^[A-Z]{4}0[A-Z0-9]{6}$/, 'Invalid IFSC code'),
   beneficiaryName: z.string().min(2).max(120),
 })
-export type SubmitBankDetailsDto = z.infer<typeof SubmitBankDetailsSchema>
-
-// ── Cashfree Easy Split vendor schemas (commented out during the Razorpay
-// rollback — kept, not deleted, for a quick re-migration) ──
-// export const CashfreeDocumentTypeSchema = z.enum([
-//   'pan_card', 'gst_certificate', 'cancelled_cheque', 'business_proof', 'id_proof',
-// ])
-// const CashfreeBankDetailsSchema = z.object({
-//   accountNumber:   z.string().min(5).max(34),
-//   ifscCode:        z.string().regex(/^[A-Z]{4}0[A-Z0-9]{6}$/, 'Invalid IFSC code'),
-//   beneficiaryName: z.string().min(2).max(120),
-// })
-// const CashfreeUpiDetailsSchema = z.object({
-//   vpa:             z.string().min(3).max(120),
-//   beneficiaryName: z.string().min(2).max(120),
-// })
-// export const CashfreeBusinessCategorySchema = z.enum([ /* ... */ ])
-// export type CashfreeBusinessCategory = z.infer<typeof CashfreeBusinessCategorySchema>
-// export const CreateCashfreeVendorSchema = z.object({ /* ... */ })
-// export type CreateCashfreeVendorDto = z.infer<typeof CreateCashfreeVendorSchema>
+const PayoutUpiSchema = z.object({
+  vpa:             z.string().regex(/^[\w.\-]{2,256}@[a-zA-Z]{2,64}$/, 'Invalid UPI ID'),
+  beneficiaryName: z.string().min(2).max(120),
+})
+export const SavePayoutDetailsSchema = z
+  .object({
+    contactName: z.string().min(2).max(255),
+    phone:       indianMobileSchema,
+    pan:         panSchema,
+    bank:        PayoutBankSchema.optional(),
+    upi:         PayoutUpiSchema.optional(),
+  })
+  .refine((v) => !!v.bank !== !!v.upi, {
+    message: 'Provide either bank details or a UPI ID (exactly one)',
+  })
+export type SavePayoutDetailsDto = z.infer<typeof SavePayoutDetailsSchema>
 
 // Phone verification during onboarding — for Google-login users who don't
 // have a phone on their account yet. Phone-login users never hit this (their

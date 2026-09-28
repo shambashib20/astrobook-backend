@@ -3,6 +3,7 @@ import { astrologerProfiles, otpVerifications, users } from '@/core/database/sch
 import { and, count, eq, gt, lt, sql } from 'drizzle-orm'
 import type {
   OnboardingDto,
+  SavePayoutDetailsDto,
   RequestAstrologerUpgradeDto,
   UpdateProfileDto,
 } from '../schemas/user.schema'
@@ -94,97 +95,25 @@ export class UserRepository {
     return profile ?? null
   }
 
-  // ── Razorpay Route onboarding ────────────────────────────────────────────────
-
-  // If the user hasn't submitted an astrologer application yet, create a
-  // bare pending row here rather than failing the onboarding step on that.
-  async ensureAstrologerProfile(userId: string) {
+  // ── Payout details (manual payouts, no Razorpay Route) ─────────────────────
+  // Upserts so an astrologer without an astrologer_profiles row yet still
+  // gets one (bare 'pending') rather than failing.
+  async savePayoutDetails(userId: string, dto: SavePayoutDetailsDto) {
+    const data = {
+      payoutMethod: dto.bank ? 'bank' : 'upi',
+      payoutDetails: dto,
+      payoutDetailsUpdatedAt: sql`now()`,
+    }
     const [profile] = await this.db
       .insert(astrologerProfiles)
-      .values({ userId, verificationStatus: 'pending' })
-      .onConflictDoUpdate({
-        target: astrologerProfiles.userId,
-        set: { updatedAt: sql`now()` },
-      })
-      .returning()
-    return profile!
-  }
-
-  async updateEmail(userId: string, email: string) {
-    const [user] = await this.db
-      .update(users)
-      .set({ email, updatedAt: sql`now()` })
-      .where(eq(users.id, userId))
-      .returning()
-    return user ?? null
-  }
-
-  // Razorpay Route onboarding is 4 staged calls (account → product →
-  // stakeholder → documents) — each step persists as soon as it comes back,
-  // so a caller that fails partway through can resume from wherever it left
-  // off instead of losing everything.
-
-  async saveRazorpayAccount(
-    userId: string,
-    data: {
-      razorpayAccountId: string
-      razorpayAccountStatus: string
-      razorpayReferenceId: string
-      razorpayAccountResponse: unknown
-    },
-  ) {
-    const [profile] = await this.db
-      .insert(astrologerProfiles)
-      .values({
-        userId,
-        verificationStatus: 'pending',
-        ...data,
-        razorpayAccountCreatedAt: sql`now()`,
-      })
+      .values({ userId, verificationStatus: 'pending', ...data })
       .onConflictDoUpdate({
         target: astrologerProfiles.userId,
         set: { ...data, updatedAt: sql`now()` },
       })
       .returning()
-    return profile ?? null
+    return profile!
   }
-
-  async saveRazorpayProduct(
-    userId: string,
-    data: { razorpayProductId: string; razorpayProductStatus: string; razorpayProductResponse: unknown },
-  ) {
-    const [profile] = await this.db
-      .update(astrologerProfiles)
-      .set({ ...data, updatedAt: sql`now()` })
-      .where(eq(astrologerProfiles.userId, userId))
-      .returning()
-    return profile ?? null
-  }
-
-  async saveRazorpayStakeholder(
-    userId: string,
-    data: { razorpayStakeholderId: string; razorpayStakeholderResponse: unknown },
-  ) {
-    const [profile] = await this.db
-      .update(astrologerProfiles)
-      .set({ ...data, updatedAt: sql`now()` })
-      .where(eq(astrologerProfiles.userId, userId))
-      .returning()
-    return profile ?? null
-  }
-
-  async saveRazorpayDocuments(userId: string, uploadedByType: Record<string, unknown>) {
-    const [profile] = await this.db
-      .update(astrologerProfiles)
-      .set({ razorpayDocumentsResponse: uploadedByType, updatedAt: sql`now()` })
-      .where(eq(astrologerProfiles.userId, userId))
-      .returning()
-    return profile ?? null
-  }
-
-  // ── Cashfree Easy Split vendor persistence (commented out during the
-  // Razorpay rollback — kept, not deleted, for a quick re-migration) ──
-  // async saveCashfreeVendor(userId: string, data: {...}) { ... }
 
   // ── Phone verification (Google-login users, during onboarding) ─────────────
   // Reuses the same otp_verifications table as /auth/send-otp — logic mirrors

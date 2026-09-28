@@ -2,11 +2,10 @@ import { env } from '@/config/env'
 import type { PushNotificationService } from '@/core/services/push-notification.service'
 import type { FastifyReply, FastifyRequest } from 'fastify'
 import {
-  CreateRazorpayAccountSchema,
-  SubmitBankDetailsSchema,
   OnboardingSchema,
   RegisterPushTokenSchema,
   RequestAstrologerUpgradeSchema,
+  SavePayoutDetailsSchema,
   SendPhoneOtpSchema,
   UpdateProfileSchema,
   VerifyPhoneOtpSchema,
@@ -97,46 +96,27 @@ export class UserController {
 
   /**
    * POST /users/me/bank-onboarding
-   * Bank onboarding — Razorpay Route account → product → stakeholder
-   * (KYC), with documents as an optional follow-up in the same call.
-   * Settlements (bank details) are a separate step — see submitBankDetails.
+   * Saves the astrologer's payout details (bank account OR UPI) in our own
+   * DB for manual payouts — no Razorpay Route / linked account involved.
    */
-  startBankOnboarding = async (request: FastifyRequest, reply: FastifyReply) => {
+  savePayoutDetails = async (request: FastifyRequest, reply: FastifyReply) => {
     const user = request.user as { userId: string }
-    const dto = CreateRazorpayAccountSchema.parse(request.body)
+    const dto = SavePayoutDetailsSchema.parse(request.body)
 
-    const account = await this.userService.startBankOnboarding(user.userId, dto)
+    const payout = await this.userService.savePayoutDetails(user.userId, dto)
 
-    return reply.status(201).send({
-      message: 'Bank onboarding step completed',
-      account,
-    })
-  }
-
-  /**
-   * POST /users/me/bank-onboarding/bank-details
-   * Submits the settlements (bank account) block against the Route product
-   * created by startBankOnboarding above.
-   */
-  submitBankDetails = async (request: FastifyRequest, reply: FastifyReply) => {
-    const user = request.user as { userId: string }
-    const dto = SubmitBankDetailsSchema.parse(request.body)
-
-    const product = await this.userService.submitBankDetails(user.userId, dto)
-
-    return reply.status(200).send({ message: 'Bank details saved', product })
+    return reply.status(201).send({ message: 'Payout details saved', payout })
   }
 
   /**
    * GET /users/me/bank-onboarding
-   * Live Razorpay account details for the logged-in astrologer's saved
-   * account id — status, KYC progress, etc., straight from Razorpay.
+   * The logged-in astrologer's saved payout details (masked).
    */
-  getBankOnboardingStatus = async (request: FastifyRequest, reply: FastifyReply) => {
+  getPayoutDetails = async (request: FastifyRequest, reply: FastifyReply) => {
     const user = request.user as { userId: string }
-    const account = await this.userService.getBankOnboardingStatus(user.userId)
+    const payout = await this.userService.getPayoutDetails(user.userId)
 
-    return reply.status(200).send({ account })
+    return reply.status(200).send({ payout })
   }
 
   /**

@@ -52,7 +52,8 @@
       "mcp__ide__getDiagnostics",
       "Bash(npx vitest *)",
       "Bash(wc -l /tmp_ts_out.txt)",
-      "Bash(cat /tmp_ts_out.txt)"
+      "Bash(cat /tmp_ts_out.txt)",
+      "PowerShell($app = \"C:\\\\Users\\\\majum\\\\OneDrive\\\\Desktop\\\\Inevelop\\\\Astrobook_app\"; git -C $app log --oneline -3 9325ada; git -C $app show \"9325ada^:src/app/\\(user\\)/checkout.tsx\" | Select-Object -First 175; \"=====CART\"; git -C $app show \"9325ada^:src/app/\\(user\\)/cart.tsx\" | Select-Object -First 175)"
     ]
   },
   "enabledMcpjsonServers": [

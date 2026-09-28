@@ -153,10 +153,12 @@ export class AdminRepository {
       // cashfreeVendorStatus: astrologerProfiles.cashfreeVendorStatus,
       // cashfreeVendorResponse: astrologerProfiles.cashfreeVendorResponse,
       // cashfreeVendorCreatedAt: astrologerProfiles.cashfreeVendorCreatedAt,
-      razorpayAccountId: astrologerProfiles.razorpayAccountId,
-      razorpayAccountStatus: astrologerProfiles.razorpayAccountStatus,
-      razorpayProductId: astrologerProfiles.razorpayProductId,
-      razorpayProductStatus: astrologerProfiles.razorpayProductStatus,
+      // Where to send this astrologer's manual payout (no Razorpay Route —
+      // all payments settle into the platform account; admin reconciles and
+      // pays out using these details). Admin-only endpoint.
+      payoutMethod: astrologerProfiles.payoutMethod,
+      payoutDetails: astrologerProfiles.payoutDetails,
+      payoutDetailsUpdatedAt: astrologerProfiles.payoutDetailsUpdatedAt,
     }
   }
 
