@@ -9,6 +9,7 @@ import { AgoraService } from '@/modules/consultation/services/agora.service'
 // import { createOrder as cfCreateOrder, getOrder as cfGetOrder } from '@/core/services/cashfree-order.service'
 import type { PushNotificationService } from '@/core/services/push-notification.service'
 import type { PaymentRepository } from '../repositories/payment.repositary'
+import type { TransactionRepository } from '../repositories/transaction.repository'
 import type { AppointmentRepository } from '@/modules/consultation/repositories/appointment.repository'
 import type {
   CreatePaymentOrderDto,
@@ -27,7 +28,13 @@ export class PaymentService {
     private readonly paymentRepository: PaymentRepository,
     private readonly appointmentRepository: AppointmentRepository,
     private readonly pushNotificationService: PushNotificationService,
+    private readonly transactionRepository: TransactionRepository,
   ) {}
+
+  // Fire-and-forget transaction log — never let a logging failure break payment flow
+  private logTx(data: Parameters<TransactionRepository['log']>[0]) {
+    this.transactionRepository.log(data).catch(() => {/* logging failure is non-fatal */})
+  }
 
   // Cron ne stale-pending samajh ke booking cancel kar di, lekin payment
   // asal mein ho chuka nikla (paisa capture ho chuka Razorpay ke paas) —
@@ -101,12 +108,26 @@ export class PaymentService {
       },
     })
 
-    // Save payment record as pending
-    await this.paymentRepository.create({
+    // Save payment record as pending — denormalize userId/astrologerId for admin reconciliation
+    const payment = await this.paymentRepository.create({
       appointmentId,
+      userId: appointment.userId,
+      astrologerId: appointment.astrologerId,
       razorpayOrderId: order.id,
       amount: String(amount),
+      currency: 'INR',
       status: 'pending',
+    })
+
+    this.logTx({
+      paymentId: payment.id,
+      appointmentId,
+      userId: appointment.userId,
+      astrologerId: appointment.astrologerId,
+      razorpayOrderId: order.id,
+      event: 'order.created',
+      amount: String(amount),
+      currency: 'INR',
     })
 
     return {
@@ -136,10 +157,23 @@ export class PaymentService {
 
     if (expectedSignature !== razorpaySignature) {
       // Mark payment as failed
-      await this.paymentRepository.updateByOrderId(razorpayOrderId, {
+      const failedPayment = await this.paymentRepository.updateByOrderId(razorpayOrderId, {
         status: 'failed',
         razorpayPaymentId,
         razorpaySignature,
+      })
+      this.logTx({
+        paymentId: failedPayment?.id,
+        appointmentId,
+        userId: appointment.userId,
+        astrologerId: appointment.astrologerId,
+        razorpayOrderId,
+        razorpayPaymentId,
+        event: 'verify.failed',
+        amount: String(failedPayment?.amount ?? 0),
+        currency: 'INR',
+        failureCode: 'SIGNATURE_MISMATCH',
+        failureReason: 'Client-side payment signature verification failed',
       })
       this.pushNotificationService.sendToUser(userId, {
         title: 'Payment Nahi Hua',
@@ -192,6 +226,18 @@ export class PaymentService {
       razorpaySignature,
     })
 
+    this.logTx({
+      paymentId: updatedPayment?.id,
+      appointmentId,
+      userId: appointment.userId,
+      astrologerId: appointment.astrologerId,
+      razorpayOrderId,
+      razorpayPaymentId,
+      event: 'verify.success',
+      amount: String(updatedPayment?.amount ?? 0),
+      currency: 'INR',
+    })
+
     // Confirm appointment + set Agora credentials
     const confirmed = await this.appointmentRepository.update(appointmentId, {
       status: 'confirmed',
@@ -226,7 +272,11 @@ export class PaymentService {
   // of app ka state. Ek hi orderId pe dono (client verify + webhook) fire ho
   // sakte hain — isliye har jagah "already done?" check karke skip karte hain.
 
-  async finalizeOrderByWebhook(razorpayOrderId: string, razorpayPaymentId: string) {
+  async finalizeOrderByWebhook(
+    razorpayOrderId: string,
+    razorpayPaymentId: string,
+    meta?: { method?: string; capturedAt?: Date; razorpayFee?: string; razorpayTax?: string; rawPayload?: Record<string, unknown> },
+  ) {
     const paymentRows = await this.paymentRepository.findAllByOrderId(razorpayOrderId)
     if (paymentRows.length === 0) return // hamara order nahi (ya abhi tak create hi nahi hua)
 
@@ -236,7 +286,28 @@ export class PaymentService {
     await this.paymentRepository.updateByOrderId(razorpayOrderId, {
       status: 'success',
       razorpayPaymentId,
+      ...(meta?.method ? { method: meta.method } : {}),
+      ...(meta?.capturedAt ? { capturedAt: meta.capturedAt } : {}),
     })
+
+    for (const row of pendingRows) {
+      this.logTx({
+        paymentId: row.id,
+        appointmentId: row.appointmentId,
+        userId: row.userId ?? undefined,
+        astrologerId: row.astrologerId ?? undefined,
+        razorpayOrderId,
+        razorpayPaymentId,
+        event: 'payment.captured',
+        amount: String(row.amount),
+        currency: row.currency ?? 'INR',
+        method: meta?.method,
+        capturedAt: meta?.capturedAt,
+        razorpayFee: meta?.razorpayFee,
+        razorpayTax: meta?.razorpayTax,
+        rawPayload: meta?.rawPayload,
+      })
+    }
 
     for (const row of pendingRows) {
       const appointment = await this.appointmentRepository.findById(row.appointmentId)
@@ -270,7 +341,11 @@ export class PaymentService {
     }
   }
 
-  async markOrderFailedByWebhook(razorpayOrderId: string, razorpayPaymentId?: string) {
+  async markOrderFailedByWebhook(
+    razorpayOrderId: string,
+    razorpayPaymentId?: string,
+    meta?: { failureCode?: string; failureReason?: string; method?: string; rawPayload?: Record<string, unknown> },
+  ) {
     const paymentRows = await this.paymentRepository.findAllByOrderId(razorpayOrderId)
     const pendingRows = paymentRows.filter((r) => r.status === 'pending')
     if (pendingRows.length === 0) return
@@ -278,9 +353,28 @@ export class PaymentService {
     await this.paymentRepository.updateByOrderId(razorpayOrderId, {
       status: 'failed',
       ...(razorpayPaymentId ? { razorpayPaymentId } : {}),
+      ...(meta?.failureCode ? { failureCode: meta.failureCode } : {}),
+      ...(meta?.failureReason ? { failureReason: meta.failureReason } : {}),
+      ...(meta?.method ? { method: meta.method } : {}),
     })
 
     for (const row of pendingRows) {
+      this.logTx({
+        paymentId: row.id,
+        appointmentId: row.appointmentId,
+        userId: row.userId ?? undefined,
+        astrologerId: row.astrologerId ?? undefined,
+        razorpayOrderId,
+        razorpayPaymentId,
+        event: 'payment.failed',
+        amount: String(row.amount),
+        currency: row.currency ?? 'INR',
+        method: meta?.method,
+        failureCode: meta?.failureCode,
+        failureReason: meta?.failureReason,
+        rawPayload: meta?.rawPayload,
+      })
+
       const appointment = await this.appointmentRepository.findById(row.appointmentId)
       if (!appointment) continue
       this.pushNotificationService.sendToUser(appointment.userId, {
@@ -317,6 +411,17 @@ export class PaymentService {
           if (payment.razorpayOrderId) {
             await this.paymentRepository.updateByOrderId(payment.razorpayOrderId, {
               status: 'refunded',
+            })
+            this.logTx({
+              paymentId: payment.id,
+              appointmentId: appointment.id,
+              userId: payment.userId ?? undefined,
+              astrologerId: payment.astrologerId ?? undefined,
+              razorpayOrderId: payment.razorpayOrderId,
+              razorpayPaymentId: payment.razorpayPaymentId,
+              event: 'payment.refunded',
+              amount: String(payment.amount),
+              currency: payment.currency ?? 'INR',
             })
           }
         } catch (err) {

@@ -7,6 +7,7 @@ import { getAgoraUsageThisMonth } from '@/core/services/agora-usage.service'
 // import { createRefund as cfCreateRefund } from '@/core/services/cashfree-order.service'
 // import { getVendor as cfGetVendor } from '@/core/services/cashfree-vendor.service'
 import type { PaymentRepository } from '@/modules/payment/repositories/payment.repositary'
+import type { TransactionRepository } from '@/modules/payment/repositories/transaction.repository'
 import type { AppointmentRepository } from '@/modules/consultation/repositories/appointment.repository'
 import type { PushNotificationService } from '@/core/services/push-notification.service'
 import {
@@ -42,6 +43,7 @@ export class AdminService {
     private readonly paymentRepository: PaymentRepository,
     private readonly appointmentRepository: AppointmentRepository,
     private readonly pushNotificationService: PushNotificationService,
+    private readonly transactionRepository: TransactionRepository,
   ) {
     this.imagekit = new ImageKit({
       publicKey: env.IMAGEKIT_PUBLIC_KEY ?? '',
@@ -58,6 +60,47 @@ export class AdminService {
 
   async getStats() {
     return this.adminRepository.getStats()
+  }
+
+  async listTransactions(opts: {
+    page: number
+    limit: number
+    status?: string
+    userId?: string
+    astrologerId?: string
+    search?: string
+  }) {
+    const { rows, total } = await this.paymentRepository.listTransactions(opts)
+    return {
+      transactions: rows,
+      pagination: {
+        total,
+        page: opts.page,
+        limit: opts.limit,
+        totalPages: Math.max(1, Math.ceil(total / opts.limit)),
+      },
+    }
+  }
+
+  async listTransactionEvents(opts: {
+    page: number
+    limit: number
+    event?: string
+    userId?: string
+    astrologerId?: string
+    razorpayOrderId?: string
+    appointmentId?: string
+  }) {
+    const { rows, total } = await this.transactionRepository.listEvents(opts)
+    return {
+      events: rows,
+      pagination: {
+        total,
+        page: opts.page,
+        limit: opts.limit,
+        totalPages: Math.max(1, Math.ceil(total / opts.limit)),
+      },
+    }
   }
 
   // ── System health ────────────────────────────────────────────────────────

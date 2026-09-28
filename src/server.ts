@@ -17,6 +17,7 @@ import { AppointmentRepository } from './modules/consultation/repositories/appoi
 import { ServiceRepository } from './modules/consultation/repositories/service.repository'
 import { AvailabilityRepository } from './modules/consultation/repositories/availability.repository'
 import { PaymentRepository } from './modules/payment/repositories/payment.repositary'
+import { TransactionRepository } from './modules/payment/repositories/transaction.repository'
 import { PaymentService } from './modules/payment/service/payment.service'
 import { ConsultationService } from './modules/consultation/services/consultation.service'
 import { BookingService } from './modules/consultation/services/booking.service'
@@ -115,7 +116,8 @@ async function start() {
   // liye 'confirmed' hi reh jaati thin — na refund hota, na user ko pata
   // chalta. Har 5 min check, jo bhi session apne end-time + 5 min grace ke
   // baad bhi 'confirmed' hai, wo automatically refund ho jaata hai.
-  const paymentServiceForSweep = new PaymentService(paymentRepo, appointmentRepo, pushNotificationService)
+  const transactionRepoForSweep = new TransactionRepository(getDb())
+  const paymentServiceForSweep = new PaymentService(paymentRepo, appointmentRepo, pushNotificationService, transactionRepoForSweep)
   const missedSessionInterval = setInterval(async () => {
     recordCronRun(MISSED_SESSION_JOB)
     try {

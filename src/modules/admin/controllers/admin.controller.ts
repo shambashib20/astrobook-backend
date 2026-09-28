@@ -141,4 +141,46 @@ export class AdminController {
     await this.adminService.deletePost(id)
     return reply.status(200).send({ message: 'Post removed' })
   }
+
+  // GET /admin/transactions — current payment state ledger for reconciliation
+  listTransactions = async (request: FastifyRequest, reply: FastifyReply) => {
+    const q = request.query as {
+      page?: string
+      limit?: string
+      status?: string
+      userId?: string
+      astrologerId?: string
+    }
+    const result = await this.adminService.listTransactions({
+      page: Math.max(1, parseInt(q.page ?? '1', 10)),
+      limit: Math.min(100, Math.max(1, parseInt(q.limit ?? '20', 10))),
+      status: q.status,
+      userId: q.userId,
+      astrologerId: q.astrologerId,
+    })
+    return reply.status(200).send(result)
+  }
+
+  // GET /admin/transaction-events — immutable event log for dispute resolution
+  listTransactionEvents = async (request: FastifyRequest, reply: FastifyReply) => {
+    const q = request.query as {
+      page?: string
+      limit?: string
+      event?: string
+      userId?: string
+      astrologerId?: string
+      razorpayOrderId?: string
+      appointmentId?: string
+    }
+    const result = await this.adminService.listTransactionEvents({
+      page: Math.max(1, parseInt(q.page ?? '1', 10)),
+      limit: Math.min(100, Math.max(1, parseInt(q.limit ?? '20', 10))),
+      event: q.event,
+      userId: q.userId,
+      astrologerId: q.astrologerId,
+      razorpayOrderId: q.razorpayOrderId,
+      appointmentId: q.appointmentId,
+    })
+    return reply.status(200).send(result)
+  }
 }

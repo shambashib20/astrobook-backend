@@ -235,6 +235,11 @@ export const payments = pgTable(
     appointmentId: uuid('appointment_id')
       .notNull()
       .references(() => appointments.id, { onDelete: 'cascade' }),
+
+    // Denormalized for fast admin reconciliation queries — avoids joins
+    userId: uuid('user_id').references(() => users.id, { onDelete: 'set null' }),
+    astrologerId: uuid('astrologer_id').references(() => users.id, { onDelete: 'set null' }),
+
     // ── Razorpay — active again (Cashfree migration rolled back) ──
     razorpayOrderId: varchar('razorpay_order_id', { length: 255 }),
     razorpayPaymentId: varchar('razorpay_payment_id', { length: 255 }),
@@ -255,12 +260,26 @@ export const payments = pgTable(
     // cashfreeRefundId: varchar('cashfree_refund_id', { length: 255 }),
 
     amount: numeric('amount', { precision: 10, scale: 2 }).notNull(),
+    currency: varchar('currency', { length: 8 }).notNull().default('INR'),
+
+    // Payment method reported by Razorpay: upi, card, netbanking, wallet, emi
+    method: varchar('method', { length: 32 }),
+
+    // Set on webhook payment.captured — unix timestamp from Razorpay
+    capturedAt: timestamp('captured_at', { withTimezone: true }),
+
+    // Set on payment.failed — Razorpay error details for self-explanatory failure records
+    failureCode: varchar('failure_code', { length: 64 }),
+    failureReason: text('failure_reason'),
+
     status: paymentStatusEnum('status').notNull().default('pending'),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
   },
   (table) => ({
     appointmentIdIdx: index('payments_appointment_id_idx').on(table.appointmentId),
+    userIdIdx: index('payments_user_id_idx').on(table.userId),
+    astrologerIdIdx: index('payments_astrologer_id_idx').on(table.astrologerId),
     // Cashfree webhook handler looks payments up by order id — every
     // webhook delivery was a full table scan without this. (Commented out
     // alongside cashfreeOrderId during the Razorpay rollback.)
@@ -331,6 +350,71 @@ export const serviceRequests = pgTable(
   }),
 )
 
+// ─── Payment Transactions (append-only event ledger) ─────────────────────────
+// Never updated — one row per event. Used for reconciliation and dispute
+// resolution. rawPayload stores the full Razorpay webhook body as evidence.
+
+export const paymentTransactionEventEnum = pgEnum('payment_transaction_event', [
+  'order.created',      // Razorpay order created, user about to pay
+  'payment.captured',   // Razorpay webhook: payment.captured
+  'payment.failed',     // Razorpay webhook: payment.failed
+  'payment.refunded',   // Refund issued (missed session / conflict)
+  'verify.success',     // Client-side signature verify succeeded
+  'verify.failed',      // Client-side signature verify failed
+])
+
+export const paymentTransactions = pgTable(
+  'payment_transactions',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+
+    // Links — set null on delete so log survives parent row deletion
+    paymentId: uuid('payment_id').references(() => payments.id, { onDelete: 'set null' }),
+    appointmentId: uuid('appointment_id').references(() => appointments.id, {
+      onDelete: 'set null',
+    }),
+    userId: uuid('user_id').references(() => users.id, { onDelete: 'set null' }),
+    astrologerId: uuid('astrologer_id').references(() => users.id, { onDelete: 'set null' }),
+
+    // Razorpay identifiers
+    razorpayOrderId: varchar('razorpay_order_id', { length: 255 }),
+    razorpayPaymentId: varchar('razorpay_payment_id', { length: 255 }),
+
+    // Which lifecycle event this row represents
+    event: paymentTransactionEventEnum('event').notNull(),
+
+    // Amount at the time of this event
+    amount: numeric('amount', { precision: 10, scale: 2 }).notNull(),
+    currency: varchar('currency', { length: 8 }).notNull().default('INR'),
+
+    // Payment method (upi, card, netbanking, wallet, emi) — populated on capture/failed
+    method: varchar('method', { length: 32 }),
+
+    // Failure details — only set on payment.failed / verify.failed
+    failureCode: varchar('failure_code', { length: 64 }),
+    failureReason: text('failure_reason'),
+
+    // Razorpay platform fees — populated on payment.captured from webhook entity
+    razorpayFee: numeric('razorpay_fee', { precision: 10, scale: 2 }),
+    razorpayTax: numeric('razorpay_tax', { precision: 10, scale: 2 }),
+
+    capturedAt: timestamp('captured_at', { withTimezone: true }),
+
+    // Full Razorpay webhook payload stored as evidence for disputes
+    rawPayload: jsonb('raw_payload').$type<Record<string, unknown>>(),
+
+    // Immutable — this column is never updated after insert
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => ({
+    // Most common lookups: all events for an order, or all events for a user
+    orderIdIdx: index('payment_transactions_order_id_idx').on(table.razorpayOrderId),
+    userIdIdx: index('payment_transactions_user_id_idx').on(table.userId),
+    astrologerIdIdx: index('payment_transactions_astrologer_id_idx').on(table.astrologerId),
+    appointmentIdIdx: index('payment_transactions_appointment_id_idx').on(table.appointmentId),
+  }),
+)
+
 // ─── Types ───────────────────────────────────────────────────────────────────
 
 export type ConsultationService = typeof consultationServices.$inferSelect
@@ -353,3 +437,6 @@ export type NewPayment = typeof payments.$inferInsert
 
 export type ServiceRequest = typeof serviceRequests.$inferSelect
 export type NewServiceRequest = typeof serviceRequests.$inferInsert
+
+export type PaymentTransaction = typeof paymentTransactions.$inferSelect
+export type NewPaymentTransaction = typeof paymentTransactions.$inferInsert

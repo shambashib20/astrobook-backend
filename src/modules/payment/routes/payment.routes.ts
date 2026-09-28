@@ -6,6 +6,7 @@ import { AppointmentRepository } from '@/modules/consultation/repositories/appoi
 import { PaymentController } from '../controllers/payment.controller'
 import { PaymentService } from '../service/payment.service'
 import { PaymentRepository } from '../repositories/payment.repositary'
+import { TransactionRepository } from '../repositories/transaction.repository'
 import { PushNotificationService } from '@/core/services/push-notification.service'
 
 export async function paymentRoutes(app: FastifyInstance) {
@@ -14,7 +15,8 @@ export async function paymentRoutes(app: FastifyInstance) {
   const paymentRepo = new PaymentRepository(db)
   const appointmentRepo = new AppointmentRepository(db)
   const pushNotificationService = new PushNotificationService(db)
-  const paymentService = new PaymentService(paymentRepo, appointmentRepo, pushNotificationService)
+  const transactionRepo = new TransactionRepository(db)
+  const paymentService = new PaymentService(paymentRepo, appointmentRepo, pushNotificationService, transactionRepo)
   const paymentController = new PaymentController(paymentService)
 
   // POST /payments/create-order
