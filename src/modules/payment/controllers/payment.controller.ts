@@ -60,9 +60,29 @@ export class PaymentController {
 
     const event = request.body as {
       event: string
-      payload?: { payment?: { entity?: { order_id?: string; id?: string } } }
+      payload?: {
+        payment?: {
+          entity?: {
+            id?: string
+            order_id?: string
+            method?: string
+            // captured event
+            captured?: boolean
+            created_at?: number // unix seconds
+            fee?: number        // in paise
+            tax?: number        // in paise
+            // failed event
+            error_code?: string
+            error_description?: string
+            error_source?: string
+            error_step?: string
+            error_reason?: string
+          }
+        }
+      }
     }
 
+    const rawPayload = request.body as Record<string, unknown>
     const entity = event.payload?.payment?.entity
     const orderId = entity?.order_id
     const paymentId = entity?.id
@@ -72,9 +92,31 @@ export class PaymentController {
     // usi event ko baar-baar retry karega. Errors yahan sirf log hote hain.
     try {
       if (event.event === 'payment.captured' && orderId && paymentId) {
-        await this.paymentService.finalizeOrderByWebhook(orderId, paymentId)
+        await this.paymentService.finalizeOrderByWebhook(orderId, paymentId, {
+          method: entity?.method,
+          capturedAt: entity?.created_at ? new Date(entity.created_at * 1000) : undefined,
+          // Convert paise → rupees for storage
+          razorpayFee: entity?.fee != null ? String(entity.fee / 100) : undefined,
+          razorpayTax: entity?.tax != null ? String(entity.tax / 100) : undefined,
+          rawPayload,
+        })
       } else if (event.event === 'payment.failed' && orderId) {
-        await this.paymentService.markOrderFailedByWebhook(orderId, paymentId)
+        // Build a self-explanatory failure reason for admin reconciliation
+        const failureReason = [
+          entity?.error_description,
+          entity?.error_reason ? `(reason: ${entity.error_reason})` : undefined,
+          entity?.error_source ? `via ${entity.error_source}` : undefined,
+          entity?.error_step ? `at step: ${entity.error_step}` : undefined,
+        ]
+          .filter(Boolean)
+          .join(' — ') || undefined
+
+        await this.paymentService.markOrderFailedByWebhook(orderId, paymentId, {
+          failureCode: entity?.error_code,
+          failureReason,
+          method: entity?.method,
+          rawPayload,
+        })
       }
     } catch (err) {
       request.log.error(err, 'Razorpay webhook processing failed')

@@ -5,6 +5,7 @@ import { AdminController } from '../controllers/admin.controller'
 import { AdminRepository } from '../repositories/admin.repository'
 import { AdminService } from '../services/admin.service'
 import { PaymentRepository } from '@/modules/payment/repositories/payment.repositary'
+import { TransactionRepository } from '@/modules/payment/repositories/transaction.repository'
 import { AppointmentRepository } from '@/modules/consultation/repositories/appointment.repository'
 import { PushNotificationService } from '@/core/services/push-notification.service'
 
@@ -12,6 +13,7 @@ export async function adminRoutes(app: FastifyInstance) {
   const db = getDb()
   const adminRepository = new AdminRepository(db)
   const paymentRepository = new PaymentRepository(db)
+  const transactionRepository = new TransactionRepository(db)
   const appointmentRepository = new AppointmentRepository(db)
   const pushNotificationService = new PushNotificationService(db)
   const adminService = new AdminService(
@@ -19,6 +21,7 @@ export async function adminRoutes(app: FastifyInstance) {
     paymentRepository,
     appointmentRepository,
     pushNotificationService,
+    transactionRepository,
   )
   const adminController = new AdminController(adminService)
 
@@ -356,5 +359,95 @@ export async function adminRoutes(app: FastifyInstance) {
       },
     },
     adminController.deletePost,
+  )
+
+  // ── Transactions / Payment Reconciliation ───────────────────────────────────
+  // Two endpoints:
+  //   /admin/transactions      → current payment states (one row per payment)
+  //   /admin/transaction-events → immutable event log (one row per webhook event)
+
+  app.get(
+    `${prefix}/transactions`,
+    {
+      preHandler: guard,
+      schema: {
+        tags: ['Admin'],
+        summary: 'Full payment transaction ledger — search, filter, paginate for reconciliation',
+        security: [{ bearerAuth: [] }],
+        querystring: {
+          type: 'object',
+          properties: {
+            page: { type: 'integer', minimum: 1 },
+            limit: { type: 'integer', minimum: 1, maximum: 100 },
+            status: { type: 'string', enum: ['pending', 'success', 'failed', 'refunded'] },
+            userId: { type: 'string', format: 'uuid' },
+            astrologerId: { type: 'string', format: 'uuid' },
+          },
+        },
+        response: {
+          200: {
+            type: 'object',
+            properties: {
+              transactions: { type: 'array', items: { type: 'object', additionalProperties: true } },
+              pagination: {
+                type: 'object',
+                properties: {
+                  total: { type: 'integer' },
+                  page: { type: 'integer' },
+                  limit: { type: 'integer' },
+                  totalPages: { type: 'integer' },
+                },
+              },
+            },
+          },
+        },
+      },
+    },
+    adminController.listTransactions,
+  )
+
+  app.get(
+    `${prefix}/transaction-events`,
+    {
+      preHandler: guard,
+      schema: {
+        tags: ['Admin'],
+        summary: 'Immutable payment event log — drill into any order for dispute resolution',
+        security: [{ bearerAuth: [] }],
+        querystring: {
+          type: 'object',
+          properties: {
+            page: { type: 'integer', minimum: 1 },
+            limit: { type: 'integer', minimum: 1, maximum: 100 },
+            event: {
+              type: 'string',
+              enum: ['order.created', 'payment.captured', 'payment.failed', 'payment.refunded', 'verify.success', 'verify.failed'],
+            },
+            userId: { type: 'string', format: 'uuid' },
+            astrologerId: { type: 'string', format: 'uuid' },
+            razorpayOrderId: { type: 'string' },
+            appointmentId: { type: 'string', format: 'uuid' },
+          },
+        },
+        response: {
+          200: {
+            type: 'object',
+            properties: {
+              events: { type: 'array', items: { type: 'object', additionalProperties: true } },
+              pagination: {
+                type: 'object',
+                properties: {
+                  total: { type: 'integer' },
+                  page: { type: 'integer' },
+                  limit: { type: 'integer' },
+                  totalPages: { type: 'integer' },
+                },
+              },
+            },
+          },
+        },
+      },
+    },
+    adminController.listTransactionEvents,
   )
 }
