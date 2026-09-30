@@ -152,4 +152,13 @@ export class UserController {
 
     return reply.status(200).send({ user: updatedUser })
   }
+
+  // DELETE /users/me
+  // Account anonymize karta hai (personal data hatata hai, booking/payment
+  // records rakhta hai) — details UserRepository.anonymizeAccount mein.
+  deleteAccount = async (request: FastifyRequest, reply: FastifyReply) => {
+    const user = request.user as { userId: string }
+    await this.userService.deleteAccount(user.userId)
+    return reply.status(200).send({ success: true })
+  }
 }

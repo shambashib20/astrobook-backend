@@ -433,4 +433,21 @@ export async function userRoutes(app: FastifyInstance) {
     },
     userController.getPayoutDetails,
   )
+
+  // DELETE /users/me — account delete (anonymize). Play Store policy ke liye
+  // in-app account deletion zaroori hai.
+  app.delete(
+    `${prefix}/me`,
+    {
+      // Destructive + irreversible: tight cap so a stolen token can't retry.
+      config: { rateLimit: { max: 3, timeWindow: '10 minutes' } },
+      preHandler: [authenticate],
+      schema: {
+        tags: ['Users'],
+        summary: 'Delete (anonymize) the current account',
+        security: [{ bearerAuth: [] }],
+      },
+    },
+    userController.deleteAccount,
+  )
 }

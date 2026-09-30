@@ -10,6 +10,7 @@ import { cartRoutes } from './modules/cart/routes/cart.routes'
 import { categoriesRoutes } from './modules/categories/routes/categories.routes'
 import { paymentRoutes } from './modules/payment/routes/payment.routes'
 import { postsRoutes } from './modules/posts'
+import { favoritesRoutes } from './modules/favorites'
 import { followsRoutes } from './modules/follows'
 import { notificationsRoutes } from './modules/notifications'
 import { youtubeRoutes } from './modules/youtube'
@@ -111,6 +112,7 @@ export async function buildApp() {
   await app.register(consultationRoutes, { prefix: apiPrefix })
   await app.register(paymentRoutes, { prefix: apiPrefix })
   await app.register(cartRoutes, { prefix: apiPrefix })
+  await app.register(favoritesRoutes, { prefix: apiPrefix })
   await app.register(astrologerRoutes, { prefix: apiPrefix })
   await app.register(postsRoutes, { prefix: apiPrefix })
   await app.register(followsRoutes, { prefix: apiPrefix })

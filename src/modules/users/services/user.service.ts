@@ -1,5 +1,6 @@
-import { BadRequestError, ConflictError, NotFoundError, RateLimitError } from '@/core/errors'
+import { BadRequestError, ConflictError, NotFoundError, RateLimitError, ForbiddenError } from '@/core/errors'
 import { sendOtpSms } from '@/modules/auth'
+import { toCanonicalIndianPhone } from '@/core/utils/phone'
 import bcrypt from 'bcrypt'
 import type { UserRepository } from '../repositories/user.repository'
 import type {
@@ -119,15 +120,21 @@ export class UserService {
   // verify one afterwards. Phone-login users never call this — their phone
   // is already set from /auth/verify-otp at login time.
 
-  async sendPhoneOtp(userId: string, phone: string): Promise<{ otp: string }> {
+  async sendPhoneOtp(userId: string, rawPhone: string): Promise<{ otp: string }> {
     const user = await this.userRepository.findById(userId)
     if (!user) throw NotFoundError('User not found')
 
-    // Someone else already owns this number — fail fast, before spending an
-    // SMS, rather than letting them discover it only at verify-otp (where
-    // the unique constraint would reject the update anyway).
+    const phone = this.canonicalPhoneOrThrow(rawPhone)
+
+    // Kisi aur ka number ho to SMS kharch karne se pehle hi rok do — lekin agar
+    // woh sirf ek khaali duplicate phone-account hai (jaise pehle OTP se login
+    // kiya tha), to allow karte hain; verify pe wahi merge ho jaata hai.
     const existingOwner = await this.userRepository.findByPhone(phone)
-    if (existingOwner && existingOwner.id !== userId) {
+    if (
+      existingOwner &&
+      existingOwner.id !== userId &&
+      !(await this.userRepository.isDisposablePhoneShell(existingOwner))
+    ) {
       throw ConflictError('Yeh number already kisi aur account se linked hai')
     }
 
@@ -152,9 +159,11 @@ export class UserService {
     return { otp }
   }
 
-  async verifyPhoneOtp(userId: string, phone: string, otp: string) {
+  async verifyPhoneOtp(userId: string, rawPhone: string, otp: string) {
     const user = await this.userRepository.findById(userId)
     if (!user) throw NotFoundError('User not found')
+
+    const phone = this.canonicalPhoneOrThrow(rawPhone)
 
     const otpRecord = await this.userRepository.findLatestPhoneOtp(phone)
     if (!otpRecord) {
@@ -175,8 +184,21 @@ export class UserService {
     // someone else claimed this number in between send-otp and verify-otp.
     const existingOwner = await this.userRepository.findByPhone(phone)
     if (existingOwner && existingOwner.id !== userId) {
-      await this.userRepository.deletePhoneOtp(otpRecord.id)
-      throw ConflictError('Yeh number already kisi aur account se linked hai')
+      // Same insaan, do accounts: purana account agar sirf khaali phone-shell
+      // hai to hata ke number is (asli) account ko de dete hain — ek insaan =
+      // ek user. Agar usme koi bhi activity hai to auto-merge nahi karte.
+      const canMerge = await this.userRepository.isDisposablePhoneShell(existingOwner)
+      if (!canMerge) {
+        await this.userRepository.deletePhoneOtp(otpRecord.id)
+        throw ConflictError('Yeh number already kisi aur account se linked hai')
+      }
+
+      const [, merged] = await Promise.all([
+        this.userRepository.deletePhoneOtp(otpRecord.id),
+        this.userRepository.moveNumberFromShell(existingOwner.id, userId, phone),
+      ])
+      if (!merged) throw NotFoundError('User not found')
+      return merged
     }
 
     const [, updatedUser] = await Promise.all([
@@ -187,6 +209,31 @@ export class UserService {
     if (!updatedUser) throw NotFoundError('User not found')
 
     return updatedUser
+  }
+
+// ── Account deletion (anonymize) ────────────────────────────────────────────
+  async deleteAccount(userId: string) {
+    const user = await this.userRepository.findById(userId)
+    if (!user) throw NotFoundError('User not found')
+
+    if (user.role === 'admin') {
+      throw ForbiddenError('Admin accounts yahan se delete nahi ho sakte')
+    }
+
+    const active = await this.userRepository.countActiveAppointments(userId)
+    if (active > 0) {
+      throw BadRequestError(
+        'Aapke upcoming ya chalte hue sessions hain. Unhe complete ya cancel karne ke baad account delete kar sakte ho.',
+      )
+    }
+
+    await this.userRepository.anonymizeAccount(userId)
+  }
+
+  private canonicalPhoneOrThrow(raw: string): string {
+    const phone = toCanonicalIndianPhone(raw)
+    if (!phone) throw BadRequestError('Valid Indian mobile number daalo')
+    return phone
   }
 }
 
