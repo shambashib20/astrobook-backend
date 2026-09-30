@@ -24,6 +24,14 @@ export async function astrologerRoutes(app: FastifyInstance) {
           properties: {
             limit: { type: 'integer', minimum: 1, maximum: 100, default: 50 },
             offset: { type: 'integer', minimum: 0, default: 0 },
+            sort: {
+              type: 'string',
+              enum: ['recommended', 'top_rated', 'most_followed', 'experienced', 'new', 'price_low'],
+              default: 'recommended',
+            },
+            availability: { type: 'string', enum: ['all', 'online', 'offline'], default: 'all' },
+            q: { type: 'string', maxLength: 60 },
+            category: { type: 'string', maxLength: 60 },
           },
         },
       },

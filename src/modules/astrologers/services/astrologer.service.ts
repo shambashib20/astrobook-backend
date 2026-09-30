@@ -2,17 +2,18 @@
 import { NotFoundError } from '@/core/errors'
 import type { AstrologerRepository } from '../repositories/astrologer.repository'
 import { AstrologerResponseSchema } from '../schemas/astrologer.schema'
+import type { AstrologerListQuery } from '../schemas/astrologer.schema'
 
 export class AstrologerService {
   constructor(private readonly astrologerRepository: AstrologerRepository) {}
 
-  async getAll(limit?: number, offset?: number) {
-    const astrologers = await this.astrologerRepository.findAll(limit, offset)
+  async getAll(query: AstrologerListQuery) {
+    const astrologers = await this.astrologerRepository.findAll(query)
     return astrologers.map((a) => AstrologerResponseSchema.parse(a))
   }
 
   async getById(id: string) {
-    const astrologer = await this.astrologerRepository.findById(id)
+    const [astrologer] = await this.astrologerRepository.findCardsByIds([id])
     if (!astrologer) throw NotFoundError('Astrologer not found')
     return AstrologerResponseSchema.parse(astrologer)
   }

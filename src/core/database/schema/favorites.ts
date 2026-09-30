@@ -3,15 +3,16 @@ import { users } from './users'
 
 // ─── Favorites ──────────────────────────────────────────────────────────────
 // User ne jo cheezein "pasand" ki (heart dabaya) — ek hi table sab item types
-// ke liye. Abhi sirf consultation 'service' hai; courses/products aane par
-// bas naya itemType add karna hai (FAVORITE_ITEM_TYPES + favorites.service.ts
-// ka resolver), koi naya table nahi.
+// ke liye. Abhi 'service' (consultation) aur 'astrologer' hain; courses/
+// products aane par bas naya itemType add karna hai (FAVORITE_ITEM_TYPES +
+// favorites.service.ts ka resolver), koi naya table nahi. item_type varchar
+// hai, isliye naya type aane par DB migration ki zaroorat nahi.
 //
 // itemId pe FK jaan-boojh ke nahi hai — alag item types alag tables ki taraf
 // point karte hain (polymorphic). Item delete/inactive ho jaaye to list query
 // usse chhod deti hai (favorites.service.ts list()).
 
-export const FAVORITE_ITEM_TYPES = ['service'] as const
+export const FAVORITE_ITEM_TYPES = ['service', 'astrologer'] as const
 export type FavoriteItemType = (typeof FAVORITE_ITEM_TYPES)[number]
 
 export const favorites = pgTable(

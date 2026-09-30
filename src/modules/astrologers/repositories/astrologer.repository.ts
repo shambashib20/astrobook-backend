@@ -1,33 +1,77 @@
 // src/modules/astrologers/repositories/astrologer.repository.ts
-import { eq, and, gte, desc, inArray, asc } from 'drizzle-orm'
+import { eq, and, gte, desc, inArray, asc, sql, or, ilike } from 'drizzle-orm'
+import type { SQL } from 'drizzle-orm'
 import type { Database } from '@/core/database/client'
 import {
   users,
+  astrologerProfiles,
   consultationServices,
   consultationServiceVariants,
   availabilityWindows,
 } from '@/core/database/schema'
+import { ALL_CATEGORIES } from '@/modules/categories/constants'
+import type { AstrologerListQuery } from '../schemas/astrologer.schema'
+
+const CATEGORY_LABEL_BY_ID = new Map<string, string>(ALL_CATEGORIES.map((c) => [c.id, c.label]))
+
+// "Abhi available" — astrologer ne abhi ke waqt ke liye availability window
+// khol rakhi hai (window ke apne timezone mein). Booking slot-based hai, isliye
+// alag se manual "go online" toggle nahi; availability hi online status hai.
+const isOnlineExpr = sql<boolean>`exists (
+  select 1 from ${availabilityWindows} w
+  where w.astrologer_id = ${users.id}
+    and w.is_active = true
+    and w.date = (now() at time zone w.timezone)::date
+    and w.start_time <= (now() at time zone w.timezone)::time
+    and w.end_time > (now() at time zone w.timezone)::time
+)`
+
+const followersCountExpr = sql<number>`(
+  select count(*)::int from follows f where f.following_id = ${users.id}
+)`
+
+// Astrologer ki saari active services ke tags (Explore ke category ids)
+const serviceTagsExpr = sql<string[]>`coalesce((
+  select array_agg(distinct t)
+  from consultation_services s, unnest(s.tags) t
+  where s.astrologer_id = ${users.id} and s.is_active = true
+), '{}'::text[])`
+
+const ratingExpr = sql<string | null>`${astrologerProfiles.rating}`
 
 export class AstrologerRepository {
   constructor(private readonly db: Database) {}
 
-  // Unbounded before — fetched every astrologer row (every column) with no
-  // limit, so response time scaled linearly with total astrologer count.
-  //
-  // Basic service price/id ab yahin LEFT JOIN se aata hai. Pehle frontend
-  // list ke baad har astrologer ke liye alag se getServices() call karta
-  // tha (N parallel Neon round trips, ek list mein 20 astrologers matlab 20
-  // extra queries) — jo Neon ke cold-start/pooled-connection latency ke
-  // saath milke poore tab switch ko multiple seconds tak freeze kar deta
-  // tha. Ek hi query mein sab aane se woh N+1 poora khatam ho gaya.
-  async findAll(limit = 50, offset = 0) {
-    const rows = await this.db
+  // Card ke liye saara data ek hi query mein — users + astrologer_profiles +
+  // basic service + followers/online/tags subqueries. Koi N+1 nahi.
+  // Sirf zaroori user columns select hote hain (passwordHash jaise fields
+  // kabhi row mein aate hi nahi).
+  private cardQuery() {
+    return this.db
       .select({
-        user: users,
+        id: users.id,
+        name: users.name,
+        phone: users.phone,
+        avatarUrl: users.avatarUrl,
+        interests: users.interests,
+        meta: users.meta,
+        isOnboarded: users.isOnboarded,
+        createdAt: users.createdAt,
         basicServiceId: consultationServices.id,
         basicServicePrice: consultationServices.price,
+        basicServiceDuration: consultationServices.durationMinutes,
+        experience: astrologerProfiles.experience,
+        languages: astrologerProfiles.languages,
+        specializations: astrologerProfiles.specializations,
+        rating: ratingExpr,
+        totalReviews: astrologerProfiles.totalReviews,
+        isVerified: astrologerProfiles.isVerified,
+        serviceTags: serviceTagsExpr,
+        followersCount: followersCountExpr,
+        isOnline: isOnlineExpr,
       })
       .from(users)
+      .innerJoin(astrologerProfiles, eq(astrologerProfiles.userId, users.id))
       .leftJoin(
         consultationServices,
         and(
@@ -36,16 +80,155 @@ export class AstrologerRepository {
           eq(consultationServices.isActive, true),
         ),
       )
-      .where(eq(users.isAstrologer, true))
-      .orderBy(desc(users.createdAt))
-      .limit(limit)
-      .offset(offset)
+  }
 
-    return rows.map((row) => ({
-      ...row.user,
+  private orderByFor(sort: AstrologerListQuery['sort']): SQL[] {
+    const rating = sql`coalesce(${astrologerProfiles.rating}, 0)`
+    const reviews = sql`coalesce(${astrologerProfiles.totalReviews}, 0)`
+    switch (sort) {
+      case 'top_rated':
+        return [sql`${rating} desc`, sql`${reviews} desc`, sql`${users.createdAt} desc`]
+      case 'most_followed':
+        return [sql`${followersCountExpr} desc`, sql`${rating} desc`, sql`${users.createdAt} desc`]
+      case 'experienced':
+        return [
+          sql`coalesce(${astrologerProfiles.experience}, 0) desc`,
+          sql`${rating} desc`,
+          sql`${users.createdAt} desc`,
+        ]
+      case 'new':
+        return [sql`${users.createdAt} desc`]
+      case 'price_low':
+        return [sql`${consultationServices.price} asc nulls last`, sql`${users.createdAt} desc`]
+      default:
+        // recommended: abhi available pehle, phir rating, phir naye
+        return [
+          sql`${isOnlineExpr} desc`,
+          sql`${rating} desc`,
+          sql`${reviews} desc`,
+          sql`${users.createdAt} desc`,
+        ]
+    }
+  }
+
+  async findAll(query: AstrologerListQuery) {
+    const conditions: (SQL | undefined)[] = [
+      eq(users.isAstrologer, true),
+      eq(users.isBanned, false),
+      eq(astrologerProfiles.isActive, true),
+    ]
+
+    if (query.availability === 'online') conditions.push(isOnlineExpr)
+    if (query.availability === 'offline') conditions.push(sql`not ${isOnlineExpr}`)
+
+    // Top rated mein sirf woh jinka kam-se-kam ek review ho — warna 0-rating
+    // wale bhi "top" dikhenge
+    if (query.sort === 'top_rated') conditions.push(sql`${astrologerProfiles.totalReviews} > 0`)
+
+    if (query.category) {
+      conditions.push(
+        or(
+          sql`${query.category} = any(${astrologerProfiles.specializations})`,
+          sql`exists (
+            select 1 from consultation_services s
+            where s.astrologer_id = ${users.id} and s.is_active = true
+              and ${query.category} = any(s.tags)
+          )`,
+        ),
+      )
+    }
+
+    const q = query.q?.replace(/[%_\\]/g, '')
+    if (q) {
+      const like = `%${q}%`
+      conditions.push(
+        or(
+          ilike(users.name, like),
+          sql`array_to_string(${astrologerProfiles.languages}, ' ') ilike ${like}`,
+          sql`array_to_string(${astrologerProfiles.specializations}, ' ') ilike ${like}`,
+          sql`exists (
+            select 1 from consultation_services s, unnest(s.tags) t
+            where s.astrologer_id = ${users.id} and s.is_active = true and t ilike ${like}
+          )`,
+        ),
+      )
+    }
+
+    const rows = await this.cardQuery()
+      .where(and(...conditions))
+      .orderBy(...this.orderByFor(query.sort))
+      .limit(query.limit)
+      .offset(query.offset)
+
+    return rows.map((row) => this.toCard(row))
+  }
+
+  // Favourites list / profile page ke liye — same card shape, given ids ke liye
+  async findCardsByIds(ids: string[]) {
+    if (ids.length === 0) return []
+    const rows = await this.cardQuery().where(
+      and(
+        eq(users.isAstrologer, true),
+        eq(users.isBanned, false),
+        eq(astrologerProfiles.isActive, true),
+        inArray(users.id, ids),
+      ),
+    )
+    return rows.map((row) => this.toCard(row))
+  }
+
+  private toCard(row: Awaited<ReturnType<AstrologerRepository['cardQuery']>>[number]) {
+    const rating = row.rating != null ? Number(row.rating) : 0
+    const totalReviews = row.totalReviews ?? 0
+    const experienceYears = row.experience ?? 0
+    const languages = row.languages ?? []
+    const specializations = row.specializations ?? []
+
+    // Card pe categories: application mein chuni specializations aur services
+    // ke tags — dono Explore ke category ids hain, isliye dono ko label mein
+    // badalkar dedupe karte hain (case-insensitive)
+    const seen = new Set<string>()
+    const categories: string[] = []
+    for (const raw of [...specializations, ...row.serviceTags].map(
+      (id) => CATEGORY_LABEL_BY_ID.get(id) ?? id,
+    )) {
+      const key = raw.trim().toLowerCase()
+      if (!key || seen.has(key)) continue
+      seen.add(key)
+      categories.push(raw.trim())
+    }
+
+    return {
+      id: row.id,
+      name: row.name ?? '',
+      phone: row.phone,
+      avatarUrl: row.avatarUrl,
+      interests: row.interests,
+      // Purani screens abhi bhi meta.* padhti hain — unhe bhi asli data mile
+      meta: {
+        ...(row.meta ?? {}),
+        speciality: categories[0] ?? undefined,
+        exp: experienceYears > 0 ? `${experienceYears} Years` : 'New',
+        rating,
+        reviews: totalReviews,
+        languages: languages.join(', '),
+        online: row.isOnline,
+      },
+      isOnboarded: row.isOnboarded,
+      createdAt: row.createdAt,
       basicServiceId: row.basicServiceId,
       basicPrice: row.basicServicePrice,
-    }))
+      basicDurationMinutes: row.basicServiceDuration,
+      experienceYears,
+      languages,
+      specializations,
+      categories,
+      rating,
+      totalReviews,
+      followersCount: row.followersCount,
+      isOnline: row.isOnline,
+      isVerified: row.isVerified,
+    }
   }
 
   async findById(id: string) {

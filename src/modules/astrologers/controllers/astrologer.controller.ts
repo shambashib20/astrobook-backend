@@ -1,16 +1,16 @@
 // src/modules/astrologers/controllers/astrologer.controller.ts
 import type { FastifyRequest, FastifyReply } from 'fastify'
 import type { AstrologerService } from '../services/astrologer.service'
+import { AstrologerListQuerySchema } from '../schemas/astrologer.schema'
 
 export class AstrologerController {
   constructor(private readonly astrologerService: AstrologerService) {}
 
   getAll = async (request: FastifyRequest, reply: FastifyReply) => {
-    const { limit, offset } = request.query as { limit?: string; offset?: string }
-    // Clamp so a client can't force an unbounded/oversized scan.
-    const parsedLimit = Math.min(Math.max(Number(limit) || 50, 1), 100)
-    const parsedOffset = Math.max(Number(offset) || 0, 0)
-    const astrologers = await this.astrologerService.getAll(parsedLimit, parsedOffset)
+    // limit 1..100 clamp zod schema karta hai — client oversized scan force
+    // nahi kar sakta.
+    const query = AstrologerListQuerySchema.parse(request.query)
+    const astrologers = await this.astrologerService.getAll(query)
     return reply.status(200).send({ astrologers })
   }
 
