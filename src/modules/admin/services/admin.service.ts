@@ -1,5 +1,7 @@
 import { env } from '@/config/env'
-import { getPool } from '@/core/database/client'
+import { sql } from 'drizzle-orm'
+import { getDb, getPool } from '@/core/database/client'
+import { categoryMedia } from '@/core/database/schema'
 import { BadRequestError, NotFoundError } from '@/core/errors'
 import { getAgoraUsageThisMonth } from '@/core/services/agora-usage.service'
 // Cashfree refund/vendor-reconciliation — commented out during the
@@ -58,6 +60,32 @@ export class AdminService {
   // seedha upload karta hai, backend sirf token deta hai (posts module jaisa hi)
   getImageKitAuthToken() {
     return this.imagekit.getAuthenticationParameters()
+  }
+
+  // ── Category Media ──────────────────────────────────────────────────────────
+  // Admin category ka hero video / image set karta hai.
+  // Agar row nahi hai toh create, warna update — UPSERT.
+
+  async setCategoryHeroVideo(categoryId: string, heroVideoUrl: string) {
+    const db = getDb()
+    await db
+      .insert(categoryMedia)
+      .values({ id: categoryId, heroVideoUrl })
+      .onConflictDoUpdate({
+        target: categoryMedia.id,
+        set: { heroVideoUrl, updatedAt: sql`now()` },
+      })
+    return { categoryId, heroVideoUrl }
+  }
+
+  async getCategoryMedia(): Promise<Record<string, { heroVideoUrl: string | null; heroImageUrl: string | null }>> {
+    const db = getDb()
+    const rows = await db.select().from(categoryMedia)
+    const map: Record<string, { heroVideoUrl: string | null; heroImageUrl: string | null }> = {}
+    for (const row of rows) {
+      map[row.id] = { heroVideoUrl: row.heroVideoUrl ?? null, heroImageUrl: row.heroImageUrl ?? null }
+    }
+    return map
   }
 
   async getStats() {

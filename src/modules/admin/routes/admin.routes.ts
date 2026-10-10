@@ -323,6 +323,32 @@ export async function adminRoutes(app: FastifyInstance) {
     adminController.updateVerification,
   )
 
+  // ── Category Media ──────────────────────────────────────────────────────────
+
+  // PATCH /admin/categories/:id/hero-video — category ka hero video set karo
+  app.patch(
+    `${prefix}/categories/:id/hero-video`,
+    {
+      preHandler: guard,
+      schema: {
+        tags: ['Admin'],
+        summary: 'Set hero video URL for a category (ImageKit URL)',
+        security: [{ bearerAuth: [] }],
+        params: {
+          type: 'object',
+          required: ['id'],
+          properties: { id: { type: 'string', description: 'Category slug (e.g. numerology)' } },
+        },
+        body: {
+          type: 'object',
+          required: ['heroVideoUrl'],
+          properties: { heroVideoUrl: { type: 'string', format: 'uri' } },
+        },
+      },
+    },
+    adminController.setCategoryHeroVideo,
+  )
+
   // ── Posts (moderation) ──────────────────────────────────────────────────────
 
   app.get(

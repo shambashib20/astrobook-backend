@@ -8,9 +8,15 @@ export const CreatePostSchema = z.object({
   mediaType: z.enum(['IMAGE', 'VIDEO', 'TEXT']).default('TEXT'),
   bgColor: z.string().regex(HEX_COLOR).optional(),
   textColor: z.string().regex(HEX_COLOR).optional(),
-  // 2 min hard cap — frontend bhi enforce karta hai, yeh sirf backend-side
+  // 5 min hard cap — frontend bhi enforce karta hai, yeh sirf backend-side
   // safety net hai (client compress/trim ke baad ka actual duration bhejega)
-  durationSeconds: z.number().int().positive().max(120).optional(),
+  durationSeconds: z.number().int().positive().max(300).optional(),
+  // IMAGE sticker — optional draggable text overlay
+  stickerText: z.string().max(100).optional(),
+  stickerX: z.number().min(0).max(1).optional(),
+  stickerY: z.number().min(0).max(1).optional(),
+  stickerTextColor: z.string().regex(HEX_COLOR).optional(),
+  stickerBgColor: z.string().optional(), // rgba bhi allowed (STICKER_BG_COLORS mein hai)
   linkedServiceId: z.string().uuid().optional(),
   tags: z.array(z.string().min(1)).max(5).default([]),
 })

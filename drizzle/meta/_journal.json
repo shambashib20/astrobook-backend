@@ -8,6 +8,13 @@
       "when": 1790064206335,
       "tag": "0000_short_thaddeus_ross",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1791652720953,
+      "tag": "0001_stale_fabian_cortez",
+      "breakpoints": true
     }
   ]
 }

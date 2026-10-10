@@ -45,6 +45,16 @@ export class AdminController {
     return reply.status(200).send(token)
   }
 
+  // ── Category Media ──────────────────────────────────────────────────────────
+
+  // PATCH /admin/categories/:id/hero-video
+  setCategoryHeroVideo = async (request: FastifyRequest, reply: FastifyReply) => {
+    const { id } = request.params as { id: string }
+    const { heroVideoUrl } = request.body as { heroVideoUrl: string }
+    const result = await this.adminService.setCategoryHeroVideo(id, heroVideoUrl)
+    return reply.status(200).send({ success: true, data: result })
+  }
+
   // ── Users ──────────────────────────────────────────────────────────────────
 
   // GET /admin/users

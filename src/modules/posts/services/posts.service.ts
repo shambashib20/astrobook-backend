@@ -37,6 +37,13 @@ export class PostsService {
       bgColor: dto.bgColor ?? null,
       textColor: dto.textColor ?? null,
       durationSeconds: dto.durationSeconds ?? null,
+      // Sticker — sirf IMAGE posts pe meaningful hai, lekin DB mein store karne
+      // se koi harm nahi — frontend khud guard karta hai (sirf IMAGE pe send karta hai)
+      stickerText: dto.stickerText ?? null,
+      stickerX: dto.stickerX != null ? String(dto.stickerX) : null,
+      stickerY: dto.stickerY != null ? String(dto.stickerY) : null,
+      stickerTextColor: dto.stickerTextColor ?? null,
+      stickerBgColor: dto.stickerBgColor ?? null,
       linkedServiceId: dto.linkedServiceId ?? null,
       tags: dto.tags ?? [],
     })
@@ -58,30 +65,22 @@ export class PostsService {
       return this.postsRepository.findByTag(tag, limit, offset, viewerId)
     }
 
-    // Main feed — personalize only agar viewer ke paas kuch follow ya
-    // interests hai. Naye user jinhone onboarding mein kuch select nahi
-    // kiya (interests optional hai) aur abhi kisi ko follow nahi kiya,
-    // unke liye empty feed dikhane se better hai poora feed dikhana
-    // (fallback), warna app khaali lagegi.
+    // Main feed — SARI posts aati hain (no filter), sirf ORDER badalta hai.
+    // Viewer ke interests/following ke basis pe score milta hai:
+    //   interest match → +1000, following → +500, engagement → +likes*2+comments
+    // New user (no interests, no following) → effectively trending feed.
+    // Experienced user → interest posts pehle, baki baad mein — sab dikhte hain.
     if (viewerId && this.userRepository && this.followsRepository) {
       const [viewer, followingIds] = await Promise.all([
         this.userRepository.findById(viewerId),
         this.followsRepository.listFollowingIds(viewerId),
       ])
       const interestTags = viewer?.interests ?? []
-
-      if (followingIds.length > 0 || interestTags.length > 0) {
-        return this.postsRepository.findPersonalized(
-          limit,
-          offset,
-          followingIds,
-          interestTags,
-          viewerId,
-        )
-      }
+      return this.postsRepository.findFeed(limit, offset, viewerId, interestTags, followingIds)
     }
 
-    return this.postsRepository.findAll(limit, offset, {}, viewerId)
+    // No viewer (unauthenticated) → engagement-sorted trending feed
+    return this.postsRepository.findFeed(limit, offset)
   }
 
   async getPostById(id: string, viewerId?: string) {

@@ -1,5 +1,5 @@
 import { sql } from 'drizzle-orm'
-import { pgTable, uuid, text, timestamp, pgEnum, integer, unique, index } from 'drizzle-orm/pg-core'
+import { pgTable, uuid, text, timestamp, pgEnum, integer, numeric, unique, index } from 'drizzle-orm/pg-core'
 import { users } from './users'
 
 // ─── Enums ────────────────────────────────────────────────────────────────────
@@ -24,6 +24,13 @@ export const posts = pgTable(
     textColor: text('text_color'),
     // VIDEO posts ke liye — client duration bhejta hai (soft validation, display ke liye)
     durationSeconds: integer('duration_seconds'),
+    // IMAGE posts ke liye — optional single draggable text sticker
+    // x/y: 0.0 – 1.0 fractional position (percentage / 100)
+    stickerText: text('sticker_text'),
+    stickerX: numeric('sticker_x', { precision: 5, scale: 4 }),
+    stickerY: numeric('sticker_y', { precision: 5, scale: 4 }),
+    stickerTextColor: text('sticker_text_color'),
+    stickerBgColor: text('sticker_bg_color'),
     linkedServiceId: uuid('linked_service_id'), // optional — Book Now ke liye
     // Explore ke categories ke saath match karne ke liye — services.tags jaisi hi
     // ids (e.g. "vedic-astrology", "tarot"). Category detail page isi se posts filter karta hai.

@@ -94,6 +94,8 @@ export class PostsRepository {
   // Home feed personalization — PostsService.getAllPosts isse call karta
   // hai jab viewer ke paas following/interests ho. findAll ka hi wrapper
   // hai, sirf named zyada clear hai call-site pe.
+  // NOTE: Yeh ab sirf legacy reference ke liye rakha hai — getAllPosts ab
+  // seedha findFeed call karta hai.
   async findPersonalized(
     limit: number,
     offset: number,
@@ -102,6 +104,68 @@ export class PostsRepository {
     viewerId?: string,
   ) {
     return this.findAll(limit, offset, { followingIds, interestTags }, viewerId)
+  }
+
+  // ── Scored feed — main home feed ke liye ──────────────────────────────────
+  // Pehle personalization sirf FILTER se hoti thi (WHERE interest match ya
+  // following). Problem: agar koi naya user hai (koi interests/follows nahi)
+  // toh unhe sirf chronological feed milta tha, aur jinhone interests set
+  // kiye unhe SIRF woh posts milte the — baaki saari posts invisible ho jaati.
+  //
+  // Ab: saari posts aati hain (no WHERE filter), sirf ORDER badalta hai.
+  // Score formula:
+  //   +1000 agar post ke tags viewer ke interests se overlap karein
+  //   +500  agar post ka astrologer viewer follow karta ho
+  //   +2    har like ke liye (engagement signal)
+  //   +1    har comment ke liye (engagement signal)
+  //   tie-break: created_at DESC (nayi pehle)
+  //
+  // New user result: koi interest/follow nahi → score = 0 + engagement
+  // → effectively trending feed (sabse zyada likes/comments pehle).
+  // Experienced user: interest match posts upar, baki neeche — but sab dikhte hain.
+  async findFeed(
+    limit: number,
+    offset: number,
+    viewerId?: string,
+    interestTags: string[] = [],
+    followingIds: string[] = [],
+  ) {
+    // Interest boost — inline CASE WHEN, safe parameterized binding via sql.join
+    const interestBoostExpr =
+      interestTags.length > 0
+        ? sql<number>`CASE WHEN ${posts.tags} && ARRAY[${sql.join(
+            interestTags.map((t) => sql`${t}`),
+            sql`, `,
+          )}]::text[] THEN 1000 ELSE 0 END`
+        : sql<number>`0`
+
+    // Follow boost — astrologer_id UUID column hai, isliye ::uuid[] cast zaroori
+    // hai (::text[] se "operator does not exist: uuid = text" error aata hai)
+    const followBoostExpr =
+      followingIds.length > 0
+        ? sql<number>`CASE WHEN ${posts.astrologerId} = ANY(ARRAY[${sql.join(
+            followingIds.map((id) => sql`${id}`),
+            sql`, `,
+          )}]::uuid[]) THEN 500 ELSE 0 END`
+        : sql<number>`0`
+
+    // statsSelect mein already likesCount/commentsCount ke correlated subqueries
+    // hain — woh reuse karne ke bajaaye yahan naye likhne padte hain kyunki
+    // ORDER BY clause mein alias use nahi ho sakta Postgres mein.
+    const scoreExpr = sql<number>`(
+      ${interestBoostExpr}
+      + ${followBoostExpr}
+      + (SELECT COUNT(*)::int FROM ${postLikes} WHERE ${postLikes.postId} = ${posts.id}) * 2
+      + (SELECT COUNT(*)::int FROM ${postComments} WHERE ${postComments.postId} = ${posts.id})
+    )`
+
+    return this.db
+      .select(this.statsSelect(viewerId))
+      .from(posts)
+      .innerJoin(users, eq(posts.astrologerId, users.id))
+      .orderBy(desc(scoreExpr), desc(posts.createdAt))
+      .limit(limit)
+      .offset(offset)
   }
 
   // Ek astrologer ke posts
