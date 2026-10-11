@@ -15,6 +15,20 @@
       "when": 1791652720953,
       "tag": "0001_stale_fabian_cortez",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1791716371212,
+      "tag": "0002_magical_inhumans",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1791728007407,
+      "tag": "0003_foamy_rage",
+      "breakpoints": true
     }
   ]
 }

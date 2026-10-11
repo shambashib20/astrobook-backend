@@ -251,6 +251,7 @@ export class AppointmentRepository {
       agoraChannel: string
       agoraToken: string
       astrologerJoinedAt: Date
+      cancelledBy: 'user' | 'astrologer'
     }>,
   ) {
     const [appointment] = await this.db

@@ -19,6 +19,22 @@ import { users } from './users'
 
 // ─── Enums ───────────────────────────────────────────────────────────────────
 
+export const cancelledByEnum = pgEnum('cancelled_by', ['user', 'astrologer'])
+
+export const cancellationRequestStatusEnum = pgEnum('cancellation_request_status', [
+  'pending',
+  'refunded',
+  'credited',
+])
+
+export const walletCreditTypeEnum = pgEnum('wallet_credit_type', ['credit', 'debit'])
+
+export const walletCreditSourceEnum = pgEnum('wallet_credit_source', [
+  'cancellation_refund',
+  'manual',
+  'booking_payment',
+])
+
 export const appointmentStatusEnum = pgEnum('appointment_status', [
   'pending', // payment nahi hua abhi
   'confirmed', // payment done, time nahi aaya
@@ -205,6 +221,8 @@ export const appointments = pgTable(
   reminderSentAt: timestamp('reminder_sent_at', { withTimezone: true }),
 
   status: appointmentStatusEnum('status').notNull().default('pending'),
+  // Jo party ne cancel kiya — astrologer ya user
+  cancelledBy: cancelledByEnum('cancelled_by'),
   notes: text('notes'),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
@@ -415,6 +433,128 @@ export const paymentTransactions = pgTable(
   }),
 )
 
+// ─── Recurring Availability ──────────────────────────────────────────────────
+// Har hafte repeating slots — e.g. "Har Somvar 10am-1pm". Specific date
+// windows ke upar additional availability dete hain (dono combine hote hain
+// slot generation mein).
+
+export const recurringAvailability = pgTable(
+  'recurring_availability',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    astrologerId: uuid('astrologer_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    // JS-style day of week: 0=Sun, 1=Mon, 2=Tue, 3=Wed, 4=Thu, 5=Fri, 6=Sat
+    dayOfWeek: smallint('day_of_week').notNull(),
+    startTime: time('start_time').notNull(),
+    endTime: time('end_time').notNull(),
+    timezone: varchar('timezone', { length: 64 }).notNull().default('Asia/Kolkata'),
+    isActive: boolean('is_active').notNull().default(true),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    // Ek astrologer same day+time pe dobara submit kare toh upsert se reactivate
+    uniqueAstrologerDayTime: unique().on(t.astrologerId, t.dayOfWeek, t.startTime, t.endTime),
+  }),
+)
+
+// ─── Slot Locks ──────────────────────────────────────────────────────────────
+// Book My Show style soft lock — booking screen khulne pe slot 10 min ke
+// liye reserve ho jaata hai. TTL expire hone pe ya user page se jaane pe
+// auto-release.
+
+export const SLOT_LOCK_TTL_MS = 10 * 60 * 1000 // 10 minutes
+
+export const slotLocks = pgTable(
+  'slot_locks',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    astrologerId: uuid('astrologer_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    // Slot ka exact UTC timestamp
+    slotStart: timestamp('slot_start', { withTimezone: true }).notNull(),
+    lockedBy: uuid('locked_by')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    // Ek slot pe ek hi lock — duplicate insert silently drop ho jaata hai
+    uniqueAstrologerSlot: unique().on(t.astrologerId, t.slotStart),
+  }),
+)
+
+// ─── Cancellation Requests ───────────────────────────────────────────────────
+// Jab astrologer kisi confirmed (paid) booking ko cancel kare, toh user ke
+// paas 24h ka window hota hai refund ya wallet credit choose karne ke liye.
+// Agar 24h mein koi action nahi → auto-refund via cron sweep.
+
+export const CANCELLATION_CHOICE_WINDOW_MS = 24 * 60 * 60 * 1000 // 24 hours
+
+export const cancellationRequests = pgTable(
+  'cancellation_requests',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    appointmentId: uuid('appointment_id')
+      .notNull()
+      .references(() => appointments.id, { onDelete: 'cascade' }),
+    userId: uuid('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    amount: numeric('amount', { precision: 10, scale: 2 }).notNull(),
+    // Razorpay refs — needed to issue the actual refund
+    razorpayPaymentId: varchar('razorpay_payment_id', { length: 255 }).notNull(),
+    razorpayOrderId: varchar('razorpay_order_id', { length: 255 }),
+    status: cancellationRequestStatusEnum('status').notNull().default('pending'),
+    expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => ({
+    appointmentIdIdx: index('cancellation_requests_appointment_id_idx').on(table.appointmentId),
+    userIdIdx: index('cancellation_requests_user_id_idx').on(table.userId),
+    // Cron sweep: pending + expired rows ka fast lookup
+    statusExpiresAtIdx: index('cancellation_requests_status_expires_at_idx').on(
+      table.status,
+      table.expiresAt,
+    ),
+  }),
+)
+
+// ─── Wallet Credits ───────────────────────────────────────────────────────────
+// Closed-loop AstroBook wallet — sirf credit hota hai (cancellation pe), cash
+// out nahi hota. Future mein booking pe debit bhi ho sakta hai.
+
+export const walletCredits = pgTable(
+  'wallet_credits',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    userId: uuid('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    amount: numeric('amount', { precision: 10, scale: 2 }).notNull(),
+    type: walletCreditTypeEnum('type').notNull(),
+    source: walletCreditSourceEnum('source').notNull(),
+    // Jo cancellation_request se yeh credit bana — nullable (manual credits)
+    cancellationRequestId: uuid('cancellation_request_id').references(
+      () => cancellationRequests.id,
+      { onDelete: 'set null' },
+    ),
+    description: text('description'),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => ({
+    userIdIdx: index('wallet_credits_user_id_idx').on(table.userId),
+    cancellationRequestIdIdx: index('wallet_credits_cancellation_request_id_idx').on(
+      table.cancellationRequestId,
+    ),
+  }),
+)
+
 // ─── Types ───────────────────────────────────────────────────────────────────
 
 export type ConsultationService = typeof consultationServices.$inferSelect
@@ -440,3 +580,15 @@ export type NewServiceRequest = typeof serviceRequests.$inferInsert
 
 export type PaymentTransaction = typeof paymentTransactions.$inferSelect
 export type NewPaymentTransaction = typeof paymentTransactions.$inferInsert
+
+export type RecurringAvailability = typeof recurringAvailability.$inferSelect
+export type NewRecurringAvailability = typeof recurringAvailability.$inferInsert
+
+export type SlotLock = typeof slotLocks.$inferSelect
+export type NewSlotLock = typeof slotLocks.$inferInsert
+
+export type CancellationRequest = typeof cancellationRequests.$inferSelect
+export type NewCancellationRequest = typeof cancellationRequests.$inferInsert
+
+export type WalletCredit = typeof walletCredits.$inferSelect
+export type NewWalletCredit = typeof walletCredits.$inferInsert

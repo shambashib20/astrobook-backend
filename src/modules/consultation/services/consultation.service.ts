@@ -2,10 +2,15 @@ import { BadRequestError, ForbiddenError, NotFoundError } from '@/core/errors'
 import type { ServiceRepository } from '../repositories/service.repository'
 import type { AvailabilityRepository } from '../repositories/availability.repository'
 import type { AppointmentRepository } from '../repositories/appointment.repository'
+import type { RecurringAvailabilityRepository } from '../repositories/recurring-availability.repository'
+import type { SlotLockRepository } from '../repositories/slot-lock.repository'
 import type {
   CreateServiceDto,
   UpdateServiceDto,
   CreateAvailabilityDto,
+  CreateRecurringAvailabilityBatchDto,
+  LockSlotDto,
+  ReleaseSlotDto,
 } from '../schemas/consultation.schema'
 
 // ─── Slot Generation Helper ───────────────────────────────────────────────────
@@ -47,6 +52,7 @@ export type TimeSlot = {
   startTime: string // ISO string
   endTime: string // ISO string
   available: boolean
+  softLocked: boolean // Book My Show style — kisi aur ne 10 min ke liye reserve kar rakha hai
 }
 
 // ─── ConsultationService ──────────────────────────────────────────────────────
@@ -56,6 +62,8 @@ export class ConsultationService {
     private readonly serviceRepository: ServiceRepository,
     private readonly availabilityRepository: AvailabilityRepository,
     private readonly appointmentRepository: AppointmentRepository,
+    private readonly recurringAvailabilityRepository: RecurringAvailabilityRepository,
+    private readonly slotLockRepository: SlotLockRepository,
   ) {}
 
   // ── Astrologer: Services ───────────────────────────────────────────────────
@@ -148,14 +156,30 @@ export class ConsultationService {
   }
 
   // Helper — services list ke saath unke variants attach karo (N+1 avoid
-  // karne ke liye ek hi query se saare variants fetch karke group karte hain)
+  // karne ke liye ek hi query se saare variants fetch karke group karte hain).
+  // Self-heal: agar kisi service ke variants missing hain (drizzle-kit push
+  // ne table wipe kar di ho), toh ensureVariants call karke dobara fetch karo.
   private async attachVariants<T extends { id: string }>(
     services: T[],
   ): Promise<(T & { variants: Awaited<ReturnType<ServiceRepository['findVariantsByService']>> })[]> {
     if (services.length === 0) return []
-    const allVariants = await Promise.all(
+    let allVariants = await Promise.all(
       services.map((s) => this.serviceRepository.findVariantsByService(s.id)),
     )
+    // Koi bhi service bina variants ke? ensureVariants se self-heal karo
+    const healIndices = services.map((_, i) => i).filter((i) => allVariants[i]!.length === 0)
+    if (healIndices.length > 0) {
+      await Promise.allSettled(
+        healIndices.map((i) => this.serviceRepository.ensureVariants(services[i]!.id)),
+      )
+      // Healed services ke variants dobara fetch karo
+      const healed = await Promise.all(
+        healIndices.map((i) => this.serviceRepository.findVariantsByService(services[i]!.id)),
+      )
+      healIndices.forEach((origIdx, healIdx) => {
+        allVariants[origIdx] = healed[healIdx]!
+      })
+    }
     return services.map((service, i) => ({ ...service, variants: allVariants[i]! }))
   }
 
@@ -208,14 +232,94 @@ export class ConsultationService {
     return this.availabilityRepository.delete(id, astrologerId)
   }
 
+  // ── Astrologer: Recurring Availability ────────────────────────────────────
+
+  /**
+   * Ek batch POST se multiple days set karo (Mon/Wed/Fri chips se).
+   * Promise.allSettled use karta hai — partial success bhi ok hai.
+   */
+  async setRecurringAvailability(astrologerId: string, dto: CreateRecurringAvailabilityBatchDto) {
+    const results = await Promise.allSettled(
+      dto.daysOfWeek.map((dayOfWeek) =>
+        this.recurringAvailabilityRepository.upsert(astrologerId, {
+          dayOfWeek,
+          startTime: dto.startTime,
+          endTime: dto.endTime,
+          timezone: dto.timezone ?? 'Asia/Kolkata',
+        }),
+      ),
+    )
+    return {
+      created: results.filter((r) => r.status === 'fulfilled').length,
+      failed: results.filter((r) => r.status === 'rejected').length,
+    }
+  }
+
+  async getMyRecurringAvailability(astrologerId: string) {
+    return this.recurringAvailabilityRepository.findByAstrologer(astrologerId)
+  }
+
+  async deleteRecurringAvailability(id: string, astrologerId: string) {
+    const pattern = await this.recurringAvailabilityRepository.findById(id)
+    if (!pattern) throw NotFoundError('Recurring availability pattern not found')
+    if (pattern.astrologerId !== astrologerId) {
+      throw ForbiddenError("You cannot delete another astrologer's recurring pattern")
+    }
+    return this.recurringAvailabilityRepository.delete(id, astrologerId)
+  }
+
+  // ── User: Slot Locks ───────────────────────────────────────────────────────
+
+  /** Slot soft-lock karo. Returns false agar kisi aur ka lock already hai. */
+  async lockSlot(userId: string, dto: LockSlotDto): Promise<boolean> {
+    const result = await this.slotLockRepository.acquireOrRefresh(
+      dto.astrologerId,
+      new Date(dto.slotStart),
+      userId,
+    )
+    return result !== null
+  }
+
+  /** Slot release karo (user page se gaya ya deselect kiya). */
+  async releaseSlot(userId: string, dto: ReleaseSlotDto): Promise<void> {
+    await this.slotLockRepository.release(dto.astrologerId, new Date(dto.slotStart), userId)
+  }
+
+  /** User ke saare active locks release karo (page close / logout). */
+  async releaseAllLocks(userId: string): Promise<void> {
+    await this.slotLockRepository.releaseAllByUser(userId)
+  }
+
   // ── User: Available Dates ──────────────────────────────────────────────────
 
   async getAvailableDates(astrologerId: string): Promise<string[]> {
+    // Specific date windows
     const windows = await this.availabilityRepository.findUpcomingByAstrologer(astrologerId)
-    // Ek din ke multiple windows ho sakte hain (11-1pm, 3-5pm, 8-10pm) —
-    // isliye Set se unique dates nikalo, warna same date UI mein double dikhta hai
-    const uniqueDates = Array.from(new Set(windows.map((w) => w.date)))
-    return uniqueDates
+    const specificDates = windows.map((w) => w.date)
+
+    // Recurring patterns — agle 30 din mein matching dayOfWeek wale dates
+    const recurringPatterns =
+      await this.recurringAvailabilityRepository.findByAstrologer(astrologerId)
+    const recurringDates: string[] = []
+    if (recurringPatterns.length > 0) {
+      const activeDaysOfWeek = new Set(recurringPatterns.map((p) => p.dayOfWeek))
+      const today = new Date()
+      today.setHours(0, 0, 0, 0)
+      for (let i = 0; i < 30; i++) {
+        const d = new Date(today)
+        d.setDate(today.getDate() + i)
+        if (activeDaysOfWeek.has(d.getDay())) {
+          const year = d.getFullYear()
+          const month = String(d.getMonth() + 1).padStart(2, '0')
+          const day = String(d.getDate()).padStart(2, '0')
+          recurringDates.push(`${year}-${month}-${day}`)
+        }
+      }
+    }
+
+    // Merge + deduplicate + sort
+    const allDates = Array.from(new Set([...specificDates, ...recurringDates]))
+    return allDates.sort()
   }
 
   async getAvailabilityForDate(astrologerId: string, date: string) {
@@ -251,8 +355,26 @@ export class ConsultationService {
       throw BadRequestError('Variant does not belong to the specified service')
     }
 
-    // Us din ke saare availability windows fetch karo
-    const windows = await this.availabilityRepository.findAllByDate(astrologerId, date)
+    // Us din ke saare specific availability windows fetch karo
+    const specificWindows = await this.availabilityRepository.findAllByDate(astrologerId, date)
+
+    // Us din ke dayOfWeek ke recurring patterns bhi fetch karo
+    const dayOfWeek = new Date(`${date}T00:00:00`).getDay()
+    const recurringPatterns = await this.recurringAvailabilityRepository.findByAstrologerAndDays(
+      astrologerId,
+      [dayOfWeek],
+    )
+
+    // Recurring patterns ko window format mein convert karo (date attach karke)
+    const recurringWindows = recurringPatterns.map((p) => ({
+      date,
+      startTime: p.startTime,
+      endTime: p.endTime,
+      timezone: p.timezone,
+    }))
+
+    // Dono combine karo — specific + recurring
+    const windows = [...specificWindows, ...recurringWindows]
     if (windows.length === 0) return [] // Koi availability nahi
 
     const durationMs = variant.durationMinutes * 60 * 1000
@@ -266,6 +388,15 @@ export class ConsultationService {
       dayStart,
       dayEnd,
     )
+
+    // Active slot locks fetch karo (poore din ke liye)
+    const activeLocks = await this.slotLockRepository.findActiveByAstrologerInRange(
+      astrologerId,
+      dayStart,
+      dayEnd,
+    )
+    // ISO string set for O(1) lookup
+    const lockedSlotStarts = new Set(activeLocks.map((l) => l.slotStart.toISOString()))
 
     const slots: TimeSlot[] = []
 
@@ -293,10 +424,14 @@ export class ConsultationService {
         // Past slots available nahi honge
         const isPast = slotStart < new Date()
 
+        // Soft lock — kisi aur ne 10 min ke liye reserve kar rakha hai
+        const softLocked = lockedSlotStarts.has(slotStart.toISOString())
+
         slots.push({
           startTime: slotStart.toISOString(),
           endTime: slotEnd.toISOString(),
           available: !isBooked && !isPast,
+          softLocked,
         })
 
         // Next slot

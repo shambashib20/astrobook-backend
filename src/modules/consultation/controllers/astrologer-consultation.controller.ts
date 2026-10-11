@@ -6,6 +6,9 @@ import {
   UpdateServiceSchema,
   UpdateServiceVariantSchema,
   CreateAvailabilitySchema,
+  CreateRecurringAvailabilitySchema,
+  LockSlotSchema,
+  ReleaseSlotSchema,
   GetSlotsQuerySchema,
   BrowseServicesQuerySchema,
 } from '../schemas/consultation.schema'
@@ -86,6 +89,29 @@ export class AstrologerConsultationController {
     return reply.status(204).send()
   }
 
+  // POST /consultation/availability/recurring
+  setRecurringAvailability = async (request: FastifyRequest, reply: FastifyReply) => {
+    const { userId: astrologerId } = request.user as { userId: string }
+    const dto = CreateRecurringAvailabilitySchema.parse(request.body)
+    const result = await this.consultationService.setRecurringAvailability(astrologerId, dto)
+    return reply.status(201).send({ success: true, data: result })
+  }
+
+  // GET /consultation/availability/recurring/mine
+  getMyRecurringAvailability = async (request: FastifyRequest, reply: FastifyReply) => {
+    const { userId: astrologerId } = request.user as { userId: string }
+    const recurring = await this.consultationService.getMyRecurringAvailability(astrologerId)
+    return reply.status(200).send({ success: true, data: { recurring } })
+  }
+
+  // DELETE /consultation/availability/recurring/:id
+  deleteRecurringAvailability = async (request: FastifyRequest, reply: FastifyReply) => {
+    const { userId: astrologerId } = request.user as { userId: string }
+    const { id } = request.params as { id: string }
+    await this.consultationService.deleteRecurringAvailability(id, astrologerId)
+    return reply.status(204).send()
+  }
+
   // GET /consultation/schedule
   getSchedule = async (request: FastifyRequest, reply: FastifyReply) => {
     const { userId: astrologerId } = request.user as { userId: string }
@@ -142,5 +168,34 @@ export class UserConsultationController {
     const services = await this.consultationService.browseServicesByTag(tag, limit, offset)
     const hasMore = services.length === limit
     return reply.status(200).send({ success: true, data: { services, hasMore } })
+  }
+
+  // POST /consultation/slots/lock — slot ko 10 min ke liye soft-lock karo
+  lockSlot = async (request: FastifyRequest, reply: FastifyReply) => {
+    const { userId } = request.user as { userId: string }
+    const dto = LockSlotSchema.parse(request.body)
+    const acquired = await this.consultationService.lockSlot(userId, dto)
+    if (!acquired) {
+      return reply.status(409).send({
+        success: false,
+        message: 'Slot is already locked by another user',
+      })
+    }
+    return reply.status(200).send({ success: true })
+  }
+
+  // DELETE /consultation/slots/lock — slot release karo
+  releaseSlot = async (request: FastifyRequest, reply: FastifyReply) => {
+    const { userId } = request.user as { userId: string }
+    const dto = ReleaseSlotSchema.parse(request.body)
+    await this.consultationService.releaseSlot(userId, dto)
+    return reply.status(200).send({ success: true })
+  }
+
+  // DELETE /consultation/slots/lock/all — user ke saare locks release karo
+  releaseAllLocks = async (request: FastifyRequest, reply: FastifyReply) => {
+    const { userId } = request.user as { userId: string }
+    await this.consultationService.releaseAllLocks(userId)
+    return reply.status(200).send({ success: true })
   }
 }

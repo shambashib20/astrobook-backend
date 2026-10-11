@@ -8,6 +8,8 @@ import {
   STALE_PENDING_CLEANUP_JOB,
   MISSED_SESSION_SWEEP_INTERVAL_MS,
   MISSED_SESSION_JOB,
+  CANCELLATION_SWEEP_INTERVAL_MS,
+  CANCELLATION_SWEEP_JOB,
   recordCronError,
   recordCronRun,
   recordCronSuccess,
@@ -26,6 +28,8 @@ import { PushNotificationService } from './core/services/push-notification.servi
 import { NotificationsRepository } from './modules/notifications/repositories/notifications.repository'
 import { NotificationsService } from './modules/notifications/services/notifications.service'
 import { SessionSweepScheduler } from './core/services/session-sweep-scheduler'
+import { WalletRepository } from './modules/wallet/repositories/wallet.repository'
+import { WalletService } from './modules/wallet/services/wallet.service'
 // Cashfree Easy Split monthly vendor settlement cron — commented out during
 // the Razorpay rollback (kept, not deleted, for a quick re-migration). See
 // also SETTLEMENT_INTERVAL_MS/SETTLEMENT_JOB in cron-heartbeat.ts.
@@ -81,6 +85,7 @@ async function start() {
   const availabilityRepo = new AvailabilityRepository(getDb())
   const serviceRepo = new ServiceRepository(getDb())
   const paymentRepo = new PaymentRepository(getDb())
+  const walletRepo = new WalletRepository(getDb())
   const consultationServiceForCleanup = new ConsultationService(
     serviceRepo,
     availabilityRepo,
@@ -92,6 +97,7 @@ async function start() {
     new AgoraService(),
     pushNotificationService,
     paymentRepo,
+    walletRepo,
   )
   const stalePendingCleanupInterval = setInterval(async () => {
     recordCronRun(STALE_PENDING_CLEANUP_JOB)
@@ -118,6 +124,28 @@ async function start() {
   // baad bhi 'confirmed' hai, wo automatically refund ho jaata hai.
   const transactionRepoForSweep = new TransactionRepository(getDb())
   const paymentServiceForSweep = new PaymentService(paymentRepo, appointmentRepo, pushNotificationService, transactionRepoForSweep)
+
+  // ── Cancellation auto-refund sweep ─────────────────────────────────────────
+  // Astrologer-cancel pe user ko 24h choice window milta hai. Jo user 24h mein
+  // kuch nahi karta, unhe yahan auto-refund kar dete hain.
+  const walletServiceForSweep = new WalletService(walletRepo, paymentRepo)
+  const cancellationSweepInterval = setInterval(async () => {
+    recordCronRun(CANCELLATION_SWEEP_JOB)
+    try {
+      const count = await walletServiceForSweep.processExpiredCancellations()
+      if (count > 0) {
+        app.log.info({ count }, 'Auto-refunded expired cancellation requests')
+      }
+      recordCronSuccess(CANCELLATION_SWEEP_JOB)
+    } catch (err) {
+      app.log.error(err, 'Cancellation auto-refund sweep failed')
+      recordCronError(CANCELLATION_SWEEP_JOB, err)
+      pushLog('cron', 'error', 'Cancellation auto-refund sweep failed', {
+        error: err instanceof Error ? err.message : String(err),
+      })
+    }
+  }, CANCELLATION_SWEEP_INTERVAL_MS)
+
   const missedSessionInterval = setInterval(async () => {
     recordCronRun(MISSED_SESSION_JOB)
     try {
@@ -164,6 +192,7 @@ async function start() {
     sessionSweep.stop()
     clearInterval(notificationCleanupInterval)
     clearInterval(stalePendingCleanupInterval)
+    clearInterval(cancellationSweepInterval)
     clearInterval(missedSessionInterval)
     // clearInterval(settlementInterval)
 

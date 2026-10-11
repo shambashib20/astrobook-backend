@@ -5,8 +5,11 @@ import { authenticate, requireRole } from '@/modules/auth'
 import { ServiceRepository } from '../repositories/service.repository'
 import { AvailabilityRepository } from '../repositories/availability.repository'
 import { AppointmentRepository } from '../repositories/appointment.repository'
+import { RecurringAvailabilityRepository } from '../repositories/recurring-availability.repository'
+import { SlotLockRepository } from '../repositories/slot-lock.repository'
 import { ServiceRequestRepository } from '../repositories/service-request.repository'
 import { PaymentRepository } from '@/modules/payment/repositories/payment.repositary'
+import { WalletRepository } from '@/modules/wallet/repositories/wallet.repository'
 
 import { ConsultationService } from '../services/consultation.service'
 import { BookingService } from '../services/booking.service'
@@ -28,8 +31,11 @@ export async function consultationRoutes(app: FastifyInstance) {
   const serviceRepo = new ServiceRepository(db)
   const availabilityRepo = new AvailabilityRepository(db)
   const appointmentRepo = new AppointmentRepository(db)
+  const recurringAvailabilityRepo = new RecurringAvailabilityRepository(db)
+  const slotLockRepo = new SlotLockRepository(db)
   const serviceRequestRepo = new ServiceRequestRepository(db)
   const paymentRepo = new PaymentRepository(db)
+  const walletRepo = new WalletRepository(db)
 
   // ─── Services ────────────────────────────────────────────────────────────
   const agoraService = new AgoraService()
@@ -38,6 +44,8 @@ export async function consultationRoutes(app: FastifyInstance) {
     serviceRepo,
     availabilityRepo,
     appointmentRepo,
+    recurringAvailabilityRepo,
+    slotLockRepo,
   )
   const bookingService = new BookingService(
     appointmentRepo,
@@ -45,6 +53,7 @@ export async function consultationRoutes(app: FastifyInstance) {
     agoraService,
     pushNotificationService,
     paymentRepo,
+    walletRepo,
   )
   const serviceRequestService = new ServiceRequestService(serviceRequestRepo, appointmentRepo)
 
@@ -131,6 +140,34 @@ export async function consultationRoutes(app: FastifyInstance) {
     astroController.deleteAvailability,
   )
 
+  // Recurring Availability
+  app.post(
+    '/consultation/availability/recurring',
+    {
+      preHandler: [authenticate, requireRole(['astrologer', 'admin'])],
+    },
+    astroController.setRecurringAvailability,
+  )
+
+  app.get(
+    '/consultation/availability/recurring/mine',
+    {
+      preHandler: [authenticate, requireRole(['astrologer', 'admin'])],
+    },
+    astroController.getMyRecurringAvailability,
+  )
+
+  app.delete(
+    '/consultation/availability/recurring/:id',
+    {
+      preHandler: [authenticate, requireRole(['astrologer', 'admin'])],
+      schema: {
+        params: { type: 'object', properties: { id: { type: 'string' } } },
+      },
+    },
+    astroController.deleteRecurringAvailability,
+  )
+
   // Schedule
   app.get(
     '/consultation/schedule',
@@ -184,6 +221,34 @@ export async function consultationRoutes(app: FastifyInstance) {
   // Explore category detail page — kisi bhi astrologer ki us tag wali services
   // GET /consultation/services/browse?tag=X&limit=&offset=
   app.get('/consultation/services/browse', userController.browseByTag)
+
+  // Slot Locks — Book My Show style soft reservation
+  // POST /consultation/slots/lock
+  app.post(
+    '/consultation/slots/lock',
+    {
+      preHandler: [authenticate],
+    },
+    userController.lockSlot,
+  )
+
+  // DELETE /consultation/slots/lock — ek specific slot release karo
+  app.delete(
+    '/consultation/slots/lock',
+    {
+      preHandler: [authenticate],
+    },
+    userController.releaseSlot,
+  )
+
+  // DELETE /consultation/slots/lock/all — user ke saare locks release karo (page close / logout)
+  app.delete(
+    '/consultation/slots/lock/all',
+    {
+      preHandler: [authenticate],
+    },
+    userController.releaseAllLocks,
+  )
 
   // ═══════════════════════════════════════════════════════════════════════════
   // BOOKING ROUTES (authenticated)

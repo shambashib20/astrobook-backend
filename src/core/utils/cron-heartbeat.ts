@@ -46,6 +46,12 @@ export const MISSED_SESSION_JOB = 'missed-session-refund'
 export const MISSED_SESSION_SWEEP_INTERVAL_MS = 5 * 60 * 1000
 export const MISSED_SESSION_GRACE_MS = 5 * 60 * 1000
 
+// Cancellation choice window auto-refund — jab astrologer cancel karta hai,
+// user ke paas 24h hota hai refund ya wallet credit choose karne ke liye.
+// Is sweep mein expired + pending requests ko auto-refund karte hain.
+export const CANCELLATION_SWEEP_JOB = 'cancellation-auto-refund'
+export const CANCELLATION_SWEEP_INTERVAL_MS = 5 * 60 * 1000
+
 type JobState = {
   lastRunAt: Date | null
   lastSuccessAt: Date | null

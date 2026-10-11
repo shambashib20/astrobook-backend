@@ -7,8 +7,10 @@ import type { ConsultationService } from './consultation.service'
 import type { AgoraService } from './agora.service'
 import type { PushNotificationService } from '@/core/services/push-notification.service'
 import type { PaymentRepository } from '@/modules/payment/repositories/payment.repositary'
+import type { WalletRepository } from '@/modules/wallet/repositories/wallet.repository'
 import type { CreateBookingDto } from '../schemas/consultation.schema'
 import type { Appointment } from '@/core/database/schema'
+import { CANCELLATION_CHOICE_WINDOW_MS } from '@/core/database/schema'
 
 const razorpay = new Razorpay({
   key_id: env.RAZORPAY_KEY_ID,
@@ -73,6 +75,7 @@ export class BookingService {
     private readonly agoraService: AgoraService,
     private readonly pushNotificationService: PushNotificationService,
     private readonly paymentRepository: PaymentRepository,
+    private readonly walletRepository: WalletRepository,
   ) {}
 
   // ── Initiate Booking (pending — payment abhi baki) ────────────────────────
@@ -336,78 +339,107 @@ export class BookingService {
     const wasConfirmedPaid = appointment.status === 'confirmed'
     const isAstrologerCancelling = requesterId === appointment.astrologerId
 
-    const updated = await this.appointmentRepository.update(appointmentId, { status: 'cancelled' })
+    // Appointment cancel + cancelledBy record karo
+    const updated = await this.appointmentRepository.update(appointmentId, {
+      status: 'cancelled',
+      cancelledBy: isAstrologerCancelling ? 'astrologer' : 'user',
+    })
 
-    // Cashfree's admin-approved refund flow (flagging a paid appointment's
-    // payment for refund) — commented out during the Razorpay rollback,
-    // kept, not deleted, for a quick re-migration; no refund concept
-    // existed pre-Cashfree.
-    // await this.paymentRepository.markRefundPending(appointmentId)
-
-    // Refund sirf tab evaluate karte hain jab booking already CONFIRMED
-    // (paid) thi — 'pending' cancel mein koi successful payment hi nahi hai
-    // to refund ka sawaal nahi (pehle se allowed, bina refund ke).
-    let refunded = false
+    // Refund logic — sirf jab booking CONFIRMED (paid) thi
     if (wasConfirmedPaid) {
       const payment = await this.paymentRepository.findByAppointmentId(appointmentId)
       const msUntilSession = appointment.scheduledAt.getTime() - Date.now()
 
-      // Astrologer cancel kare to koi threshold nahi — hamesha full refund
-      // (uski galti hai). User khud cancel kare to sirf tab refund milta hai
-      // jab session shuru hone mein kam se kam 48 ghante baaki hon — usse
-      // kam gap pe cancel (ya miss/incomplete) forfeit ho jaata hai.
-      const eligibleForRefund =
-        isAstrologerCancelling || msUntilSession >= USER_CANCEL_REFUND_WINDOW_MS
+      if (isAstrologerCancelling) {
+        // ── Astrologer cancel ────────────────────────────────────────────────
+        // Hamesha user ko full refund milega — lekin immediate nahi. User ko
+        // 24h window dete hain ki wo decide kare: Razorpay refund (7 business
+        // days) ya AstroBook wallet credit (instant). Agar 24h mein koi action
+        // nahi toh cron auto-refund kar deta hai (wallet.service.ts).
+        if (payment?.status === 'success' && payment.razorpayPaymentId) {
+          const expiresAt = new Date(Date.now() + CANCELLATION_CHOICE_WINDOW_MS)
+          try {
+            await this.walletRepository.createCancellationRequest({
+              appointmentId,
+              userId: appointment.userId,
+              amount: payment.amount,
+              razorpayPaymentId: payment.razorpayPaymentId,
+              razorpayOrderId: payment.razorpayOrderId ?? undefined,
+              expiresAt,
+            })
 
-      if (eligibleForRefund && payment?.status === 'success' && payment.razorpayPaymentId) {
-        try {
-          await razorpay.payments.refund(payment.razorpayPaymentId, {})
-          if (payment.razorpayOrderId) {
-            await this.paymentRepository.updateByOrderId(payment.razorpayOrderId, {
-              status: 'refunded',
+            // User ko choice notification bhejo
+            this.pushNotificationService.sendToUser(appointment.userId, {
+              title: 'Astrologer Ne Cancel Kiya',
+              body: 'Refund ya wallet credit — 24h mein choose karo. Baad mein auto-refund hoga.',
+              data: {
+                type: 'astrologer_cancelled_choice',
+                appointmentId,
+              },
+            })
+          } catch {
+            // DB fail — fallback: immediate refund
+            try {
+              await razorpay.payments.refund(payment.razorpayPaymentId, {})
+              if (payment.razorpayOrderId) {
+                await this.paymentRepository.updateByOrderId(payment.razorpayOrderId, {
+                  status: 'refunded',
+                })
+              }
+            } catch {
+              // Razorpay bhi fail — admin manual refund karega
+            }
+            this.pushNotificationService.sendToUser(appointment.userId, {
+              title: 'Astrologer Ne Cancel Kiya',
+              body: 'Tumhara poora paisa refund ho raha hai',
+              data: { type: 'astrologer_cancelled_refund', appointmentId },
             })
           }
-          refunded = true
-        } catch (err) {
-          // Refund API fail ho jaaye (network/Razorpay side) — appointment
-          // 'cancelled' + payment 'success' hi reh jaayega, admin ke liye
-          // clear "manual refund pending" flag (jaisa missed-session flow mein hai)
         }
-      }
-    }
+      } else {
+        // ── User cancel ──────────────────────────────────────────────────────
+        // Sirf tab refund milta hai jab session shuru hone mein kam se kam
+        // 48 ghante baaki hon — usse kam gap pe cancel forfeit ho jaata hai.
+        const eligibleForRefund = msUntilSession >= USER_CANCEL_REFUND_WINDOW_MS
+        let refunded = false
 
-    // Jo party cancel nahi kar rahi, usko batao — requester ko khud pata hai.
-    // Astrologer-cancel + paid case mein neeche ek zyada specific (refund
-    // wala) notification usi user ko jaa rahi hai, isliye yahan generic wala
-    // skip karte hain (warna same cancellation ke liye do notifications aa
-    // jaatin).
-    const otherPartyId =
-      requesterId === appointment.userId ? appointment.astrologerId : appointment.userId
-    const skipGenericOtherPartyNotice = wasConfirmedPaid && isAstrologerCancelling
-    if (!skipGenericOtherPartyNotice) {
+        if (eligibleForRefund && payment?.status === 'success' && payment.razorpayPaymentId) {
+          try {
+            await razorpay.payments.refund(payment.razorpayPaymentId, {})
+            if (payment.razorpayOrderId) {
+              await this.paymentRepository.updateByOrderId(payment.razorpayOrderId, {
+                status: 'refunded',
+              })
+            }
+            refunded = true
+          } catch {
+            // Refund fail — payment 'success' hi reh jaayega, admin dekhega
+          }
+        }
+
+        this.pushNotificationService.sendToUser(requesterId, {
+          title: refunded ? 'Booking Cancelled — Refund Ho Raha Hai' : 'Booking Cancelled',
+          body: refunded
+            ? 'Tumhara poora paisa refund ho raha hai'
+            : 'Session shuru hone mein 48 ghante se kam bacha tha — is booking ka refund nahi banta',
+          data: { type: 'booking_cancelled_self', appointmentId, refunded: String(refunded) },
+        })
+
+        // Astrologer ko bhi batao
+        this.pushNotificationService.sendToUser(appointment.astrologerId, {
+          title: 'Booking Cancelled',
+          body: 'User ne ek booking cancel kar di hai',
+          data: { type: 'booking_cancelled', appointmentId },
+        })
+      }
+    } else {
+      // Unpaid cancel — dono ko simple notify
+      const otherPartyId =
+        requesterId === appointment.userId ? appointment.astrologerId : appointment.userId
       this.pushNotificationService.sendToUser(otherPartyId, {
         title: 'Booking Cancelled',
         body: 'Tumhari ek booking cancel ho gayi hai',
         data: { type: 'booking_cancelled', appointmentId },
-      })
-    }
-
-    // Cancel karne wale ko refund status ka clear feedback — khaas taur pe
-    // "no refund" wala case explicit batana zaroori hai (warna user samjhega
-    // paisa apne aap wapas aa jayega)
-    if (wasConfirmedPaid && !isAstrologerCancelling) {
-      this.pushNotificationService.sendToUser(requesterId, {
-        title: refunded ? 'Booking Cancelled — Refund Ho Raha Hai' : 'Booking Cancelled',
-        body: refunded
-          ? 'Tumhara poora paisa refund ho raha hai'
-          : 'Session shuru hone mein 48 ghante se kam bacha tha — is booking ka refund nahi banta',
-        data: { type: 'booking_cancelled_self', appointmentId, refunded: String(refunded) },
-      })
-    } else if (wasConfirmedPaid && isAstrologerCancelling) {
-      this.pushNotificationService.sendToUser(appointment.userId, {
-        title: 'Astrologer Ne Cancel Kiya',
-        body: 'Tumhara poora paisa refund ho raha hai',
-        data: { type: 'astrologer_cancelled_refund', appointmentId },
       })
     }
 

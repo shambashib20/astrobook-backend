@@ -63,6 +63,54 @@ export const CreateAvailabilitySchema = z
     { message: 'Availability date cannot be in the past', path: ['date'] },
   )
 
+// ─── Recurring Availability ───────────────────────────────────────────────────
+
+// Internal DTO — repository.upsert() ek baar mein ek day leta hai
+export const CreateSingleRecurringAvailabilitySchema = z
+  .object({
+    dayOfWeek: z.number().int().min(0).max(6),
+    startTime: z.string().regex(timeRegex, 'Start time must be HH:MM (24h)'),
+    endTime: z.string().regex(timeRegex, 'End time must be HH:MM (24h)'),
+    timezone: z.string().default('Asia/Kolkata'),
+  })
+  .refine(
+    (d) => {
+      const [sh = 0, sm = 0] = d.startTime.split(':').map(Number)
+      const [eh = 0, em = 0] = d.endTime.split(':').map(Number)
+      return sh * 60 + sm < eh * 60 + em
+    },
+    { message: 'End time must be after start time', path: ['endTime'] },
+  )
+
+// Batch schema — frontend ek POST mein multiple days bhejta hai
+export const CreateRecurringAvailabilitySchema = z
+  .object({
+    daysOfWeek: z.array(z.number().int().min(0).max(6)).min(1),
+    startTime: z.string().regex(timeRegex, 'Start time must be HH:MM (24h)'),
+    endTime: z.string().regex(timeRegex, 'End time must be HH:MM (24h)'),
+    timezone: z.string().default('Asia/Kolkata'),
+  })
+  .refine(
+    (d) => {
+      const [sh = 0, sm = 0] = d.startTime.split(':').map(Number)
+      const [eh = 0, em = 0] = d.endTime.split(':').map(Number)
+      return sh * 60 + sm < eh * 60 + em
+    },
+    { message: 'End time must be after start time', path: ['endTime'] },
+  )
+
+// ─── Slot Locks ───────────────────────────────────────────────────────────────
+
+export const LockSlotSchema = z.object({
+  astrologerId: z.string().uuid(),
+  slotStart: z.string().datetime({ message: 'Must be a valid ISO datetime', offset: true }),
+})
+
+export const ReleaseSlotSchema = z.object({
+  astrologerId: z.string().uuid(),
+  slotStart: z.string().datetime({ message: 'Must be a valid ISO datetime', offset: true }),
+})
+
 // ─── Slots Query ──────────────────────────────────────────────────────────────
 
 export const GetSlotsQuerySchema = z.object({
@@ -151,6 +199,11 @@ export const SERVICE_REQUEST_STATUS = ['pending', 'accepted', 'rejected', 'expir
 export const PAYMENT_STATUS = ['pending', 'success', 'failed'] as const
 
 // ─── Types ────────────────────────────────────────────────────────────────────
+
+export type CreateRecurringAvailabilityDto = z.infer<typeof CreateSingleRecurringAvailabilitySchema>
+export type CreateRecurringAvailabilityBatchDto = z.infer<typeof CreateRecurringAvailabilitySchema>
+export type LockSlotDto = z.infer<typeof LockSlotSchema>
+export type ReleaseSlotDto = z.infer<typeof ReleaseSlotSchema>
 
 export type CreateServiceDto = z.infer<typeof CreateServiceSchema>
 export type UpsertServiceDto = z.infer<typeof CreateServiceSchema>
