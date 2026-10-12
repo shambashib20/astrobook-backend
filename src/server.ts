@@ -18,6 +18,8 @@ import { pushLog } from './core/utils/log-buffer'
 import { AppointmentRepository } from './modules/consultation/repositories/appointment.repository'
 import { ServiceRepository } from './modules/consultation/repositories/service.repository'
 import { AvailabilityRepository } from './modules/consultation/repositories/availability.repository'
+import { RecurringAvailabilityRepository } from './modules/consultation/repositories/recurring-availability.repository'
+import { SlotLockRepository } from './modules/consultation/repositories/slot-lock.repository'
 import { PaymentRepository } from './modules/payment/repositories/payment.repositary'
 import { TransactionRepository } from './modules/payment/repositories/transaction.repository'
 import { PaymentService } from './modules/payment/service/payment.service'
@@ -86,10 +88,14 @@ async function start() {
   const serviceRepo = new ServiceRepository(getDb())
   const paymentRepo = new PaymentRepository(getDb())
   const walletRepo = new WalletRepository(getDb())
+  const recurringAvailabilityRepo = new RecurringAvailabilityRepository(getDb())
+  const slotLockRepo = new SlotLockRepository(getDb())
   const consultationServiceForCleanup = new ConsultationService(
     serviceRepo,
     availabilityRepo,
     appointmentRepo,
+    recurringAvailabilityRepo,
+    slotLockRepo,
   )
   const bookingServiceForCleanup = new BookingService(
     appointmentRepo,

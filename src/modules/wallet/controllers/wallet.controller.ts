@@ -5,34 +5,28 @@ export class WalletController {
   constructor(private readonly walletService: WalletService) {}
 
   getBalance = async (request: FastifyRequest, reply: FastifyReply) => {
-    const userId = (request.user as any).id
+    const { userId } = request.user as { userId: string }
     const wallet = await this.walletService.getBalance(userId)
-    return reply.send({ wallet })
+    return reply.status(200).send({ success: true, data: wallet })
   }
 
   getTransactions = async (request: FastifyRequest, reply: FastifyReply) => {
-    const userId = (request.user as any).id
+    const { userId } = request.user as { userId: string }
     const transactions = await this.walletService.getTransactions(userId)
-    return reply.send({ transactions })
+    return reply.status(200).send({ success: true, data: { transactions } })
   }
 
   getPendingCancellations = async (request: FastifyRequest, reply: FastifyReply) => {
-    const userId = (request.user as any).id
+    const { userId } = request.user as { userId: string }
     const requests = await this.walletService.getPendingCancellations(userId)
-    return reply.send({ requests })
+    return reply.status(200).send({ success: true, data: { requests } })
   }
 
-  claimCancellation = async (
-    request: FastifyRequest<{
-      Params: { requestId: string }
-      Body: { action: 'refund' | 'wallet' }
-    }>,
-    reply: FastifyReply,
-  ) => {
-    const userId = (request.user as any).id
-    const { requestId } = request.params
-    const { action } = request.body
+  claimCancellation = async (request: FastifyRequest, reply: FastifyReply) => {
+    const { userId } = request.user as { userId: string }
+    const { requestId } = request.params as { requestId: string }
+    const { action } = request.body as { action: 'refund' | 'wallet' }
     const result = await this.walletService.claimCancellation(requestId, userId, action)
-    return reply.send({ request: result })
+    return reply.status(200).send({ success: true, data: { request: result } })
   }
 }

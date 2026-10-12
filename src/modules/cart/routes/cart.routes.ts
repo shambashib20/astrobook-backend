@@ -6,7 +6,10 @@ import { CartRepository } from '../repositories/cart.repository'
 import { ServiceRepository } from '@/modules/consultation/repositories/service.repository'
 import { AvailabilityRepository } from '@/modules/consultation/repositories/availability.repository'
 import { AppointmentRepository } from '@/modules/consultation/repositories/appointment.repository'
+import { RecurringAvailabilityRepository } from '@/modules/consultation/repositories/recurring-availability.repository'
+import { SlotLockRepository } from '@/modules/consultation/repositories/slot-lock.repository'
 import { PaymentRepository } from '@/modules/payment/repositories/payment.repositary'
+import { WalletRepository } from '@/modules/wallet/repositories/wallet.repository'
 
 import { ConsultationService } from '@/modules/consultation/services/consultation.service'
 import { BookingService } from '@/modules/consultation/services/booking.service'
@@ -24,16 +27,20 @@ export async function cartRoutes(app: FastifyInstance) {
   const availabilityRepo = new AvailabilityRepository(db)
   const appointmentRepo = new AppointmentRepository(db)
   const paymentRepo = new PaymentRepository(db)
+  const recurringAvailabilityRepo = new RecurringAvailabilityRepository(db)
+  const slotLockRepo = new SlotLockRepository(db)
+  const walletRepo = new WalletRepository(db)
 
   const agoraService = new AgoraService()
   const pushNotificationService = new PushNotificationService(db)
-  const consultationService = new ConsultationService(serviceRepo, availabilityRepo, appointmentRepo)
+  const consultationService = new ConsultationService(serviceRepo, availabilityRepo, appointmentRepo, recurringAvailabilityRepo, slotLockRepo)
   const bookingService = new BookingService(
     appointmentRepo,
     consultationService,
     agoraService,
     pushNotificationService,
     paymentRepo,
+    walletRepo,
   )
 
   const cartService = new CartService(
