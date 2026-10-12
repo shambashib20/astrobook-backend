@@ -29,4 +29,11 @@ export class WalletController {
     const result = await this.walletService.claimCancellation(requestId, userId, action)
     return reply.status(200).send({ success: true, data: { request: result } })
   }
+
+  payWithWallet = async (request: FastifyRequest, reply: FastifyReply) => {
+    const { userId } = request.user as { userId: string }
+    const { appointmentId } = request.body as { appointmentId: string }
+    const result = await this.walletService.payWithWallet(userId, appointmentId)
+    return reply.status(200).send({ success: true, data: result })
+  }
 }

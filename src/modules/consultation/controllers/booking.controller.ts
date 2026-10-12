@@ -62,4 +62,13 @@ export class BookingController {
     const agora = await this.bookingService.renewAgoraToken(id, userId)
     return reply.status(200).send({ success: true, data: { agora } })
   }
+
+  // PATCH /consultation/appointments/:id/reschedule
+  rescheduleAppointment = async (request: FastifyRequest, reply: FastifyReply) => {
+    const { userId } = request.user as { userId: string }
+    const { id } = request.params as { id: string }
+    const { newScheduledAt } = request.body as { newScheduledAt: string }
+    const result = await this.bookingService.rescheduleAppointment(id, userId, newScheduledAt)
+    return reply.status(200).send({ success: true, data: result })
+  }
 }

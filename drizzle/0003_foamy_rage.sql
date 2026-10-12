@@ -46,7 +46,7 @@ CREATE TABLE IF NOT EXISTS "wallet_credits" (
 	"created_at" timestamp with time zone DEFAULT now() NOT NULL
 );
 --> statement-breakpoint
-ALTER TABLE "appointments" ADD COLUMN "cancelled_by" "cancelled_by";--> statement-breakpoint
+ALTER TABLE "appointments" ADD COLUMN IF NOT EXISTS "cancelled_by" "cancelled_by";--> statement-breakpoint
 DO $$ BEGIN
  ALTER TABLE "cancellation_requests" ADD CONSTRAINT "cancellation_requests_appointment_id_appointments_id_fk" FOREIGN KEY ("appointment_id") REFERENCES "public"."appointments"("id") ON DELETE cascade ON UPDATE no action;
 EXCEPTION

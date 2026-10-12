@@ -17,14 +17,17 @@ const razorpay = new Razorpay({
   key_secret: env.RAZORPAY_KEY_SECRET,
 })
 
-// User apni CONFIRMED (paid) booking cancel kare to refund sirf tab milta
-// hai jab cancellation session se kam se kam itni der pehle ho — jaise 25th
-// ko 27th ka session book kiya, to 48 ghante ka gap hona chahiye cancel
-// karte waqt. Isse kam gap pe cancel kiya (ya session miss kiya, ya
-// incomplete chhoda) to refund nahi milta — paisa forfeit ho jaata hai.
-// NOTE: yeh sirf USER-cancel pe lagta hai — astrologer cancel kare to yeh
-// threshold nahi lagta, wahan hamesha full refund hai (astrologer ki galti).
-const USER_CANCEL_REFUND_WINDOW_MS = 48 * 60 * 60 * 1000
+// User apni CONFIRMED (paid) booking cancel kare to refund/choice sirf tab
+// milta hai jab session shuru hone mein abhi 24+ ghante baaki hon. Isse kam
+// waqt pe cancel kiya (ya session miss kiya / incomplete chhoda) to koi
+// choice nahi — support se contact karo.
+// NOTE: yeh sirf USER-cancel pe lagta hai — astrologer cancel pe hamesha
+// full refund hota hai (astrologer ki galti).
+const USER_CANCEL_REFUND_WINDOW_MS = 24 * 60 * 60 * 1000 // 24 hours
+
+// Reschedule per-week limit: 1; per-month limit: 2
+const RESCHEDULE_WEEKLY_LIMIT = 1
+const RESCHEDULE_MONTHLY_LIMIT = 2
 
 // ─── UTC Helper ───────────────────────────────────────────────────────────────
 
@@ -398,32 +401,46 @@ export class BookingService {
         }
       } else {
         // ── User cancel ──────────────────────────────────────────────────────
-        // Sirf tab refund milta hai jab session shuru hone mein kam se kam
-        // 48 ghante baaki hon — usse kam gap pe cancel forfeit ho jaata hai.
-        const eligibleForRefund = msUntilSession >= USER_CANCEL_REFUND_WINDOW_MS
-        let refunded = false
+        // Session shuru hone mein 24+ ghante baaki hain toh user ko choice
+        // milta hai: Refund (7 days) | Wallet Credit (instant) | Timing Change.
+        // 24h se kam waqt pe cancel kiya toh koi choice nahi — support contact.
+        const eligibleForChoice = msUntilSession >= USER_CANCEL_REFUND_WINDOW_MS
 
-        if (eligibleForRefund && payment?.status === 'success' && payment.razorpayPaymentId) {
+        if (eligibleForChoice && payment?.status === 'success' && payment.razorpayPaymentId) {
           try {
-            await razorpay.payments.refund(payment.razorpayPaymentId, {})
-            if (payment.razorpayOrderId) {
-              await this.paymentRepository.updateByOrderId(payment.razorpayOrderId, {
-                status: 'refunded',
-              })
-            }
-            refunded = true
-          } catch {
-            // Refund fail — payment 'success' hi reh jaayega, admin dekhega
-          }
-        }
+            const expiresAt = new Date(Date.now() + CANCELLATION_CHOICE_WINDOW_MS)
+            await this.walletRepository.createCancellationRequest({
+              appointmentId,
+              userId: appointment.userId,
+              amount: payment.amount,
+              razorpayPaymentId: payment.razorpayPaymentId,
+              razorpayOrderId: payment.razorpayOrderId ?? undefined,
+              initiatedBy: 'user',
+              expiresAt,
+            })
 
-        this.pushNotificationService.sendToUser(requesterId, {
-          title: refunded ? 'Booking Cancelled — Refund Ho Raha Hai' : 'Booking Cancelled',
-          body: refunded
-            ? 'Tumhara poora paisa refund ho raha hai'
-            : 'Session shuru hone mein 48 ghante se kam bacha tha — is booking ka refund nahi banta',
-          data: { type: 'booking_cancelled_self', appointmentId, refunded: String(refunded) },
-        })
+            // User ko choice sheet ke liye notify karo
+            this.pushNotificationService.sendToUser(requesterId, {
+              title: 'Booking Cancel Ho Gayi',
+              body: 'Refund, wallet credit, ya slot change — 24h mein choose karo',
+              data: { type: 'user_cancelled_choice', appointmentId },
+            })
+          } catch {
+            // DB fail — simple cancel notification
+            this.pushNotificationService.sendToUser(requesterId, {
+              title: 'Booking Cancel Ho Gayi',
+              body: 'Tumhari booking cancel ho gayi hai',
+              data: { type: 'booking_cancelled_self', appointmentId, refunded: 'false' },
+            })
+          }
+        } else {
+          // 24h window khatam — no refund, contact support
+          this.pushNotificationService.sendToUser(requesterId, {
+            title: 'Booking Cancel Ho Gayi',
+            body: 'Session 24 ghante se kam dur tha — refund possible nahi. Help ke liye support se contact karo.',
+            data: { type: 'booking_cancelled_self', appointmentId, refunded: 'false' },
+          })
+        }
 
         // Astrologer ko bhi batao
         this.pushNotificationService.sendToUser(appointment.astrologerId, {
@@ -467,6 +484,102 @@ export class BookingService {
     }
 
     return stale.length
+  }
+
+  // ── Reschedule Appointment (user-initiated, same astrologer + service) ──────
+  // User ek cancelled appointment ke badle naya slot choose karta hai.
+  // Limits: 1 per booking | 1 per week | 2 per month.
+
+  async rescheduleAppointment(appointmentId: string, userId: string, newScheduledAtIso: string) {
+    const appointment = await this.appointmentRepository.findByIdWithDetails(appointmentId)
+    if (!appointment) throw NotFoundError('Appointment not found')
+    if (appointment.userId !== userId) throw ForbiddenError('Not your appointment')
+    if (appointment.status !== 'cancelled') {
+      throw BadRequestError('Sirf cancelled booking hi reschedule ho sakti hai')
+    }
+
+    // Per-booking limit: sirf ek baar reschedule allowed
+    if ((appointment as any).rescheduledCount >= 1) {
+      throw BadRequestError('Yeh booking pehle se ek baar reschedule ho chuki hai')
+    }
+
+    // Weekly limit check
+    const oneWeekAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000)
+    const weeklyCount = await this.walletRepository.countTimingChangesSince(userId, oneWeekAgo)
+    if (weeklyCount >= RESCHEDULE_WEEKLY_LIMIT) {
+      throw BadRequestError('Is hafte tumhara reschedule limit ho gaya hai (1 per week)')
+    }
+
+    // Monthly limit check
+    const oneMonthAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000)
+    const monthlyCount = await this.walletRepository.countTimingChangesSince(userId, oneMonthAgo)
+    if (monthlyCount >= RESCHEDULE_MONTHLY_LIMIT) {
+      throw BadRequestError('Is mahine tumhara reschedule limit ho gaya hai (2 per month)')
+    }
+
+    // New slot validation
+    const newScheduledAt = new Date(newScheduledAtIso)
+    if (isNaN(newScheduledAt.getTime())) throw BadRequestError('Invalid scheduledAt datetime')
+    if (newScheduledAt <= new Date()) throw BadRequestError('Naya slot future mein hona chahiye')
+
+    // Availability check for new slot
+    const utcDate = newScheduledAtIso.split('T')[0]!
+    const candidateDates = [utcDate, shiftDate(utcDate, -1), shiftDate(utcDate, 1)]
+    const availWindowsByDate = await Promise.all(
+      candidateDates.map((d) =>
+        this.consultationService.getAvailabilityForDate(appointment.astrologerId, d),
+      ),
+    )
+    const availWindows = availWindowsByDate.flat()
+
+    const matchingWindow = availWindows.find((w) => {
+      const windowStart = toUtcTimestamp(w.date, w.startTime, w.timezone)
+      const windowEnd = toUtcTimestamp(w.date, w.endTime, w.timezone)
+      return newScheduledAt >= windowStart && newScheduledAt < windowEnd
+    })
+    if (!matchingWindow) {
+      throw BadRequestError('Naya slot astrologer ki availability ke bahar hai')
+    }
+
+    const durationMs = appointment.durationMinutes * 60 * 1000
+    const newEndsAt = new Date(newScheduledAt.getTime() + durationMs)
+
+    // Conflict check (other confirmed bookings, excluding self)
+    const conflicts = await this.appointmentRepository.findConflictsExcluding(
+      appointment.astrologerId,
+      newScheduledAt,
+      newEndsAt,
+      appointmentId,
+    )
+    if (conflicts.length > 0) throw BadRequestError('Yeh slot already book hai')
+
+    // Pending cancellation_request close karo (timing_changed)
+    const pendingReq = await this.walletRepository.findPendingByAppointment(appointmentId)
+    if (pendingReq) {
+      await this.walletRepository.updateStatus(pendingReq.id, 'timing_changed')
+    }
+
+    // Appointment update — new slot + status confirmed + rescheduledCount++
+    const updated = await this.appointmentRepository.update(appointmentId, {
+      scheduledAt: newScheduledAt,
+      endsAt: newEndsAt,
+      status: 'confirmed',
+      rescheduledCount: ((appointment as any).rescheduledCount ?? 0) + 1,
+    })
+
+    // Notifications
+    this.pushNotificationService.sendToUser(userId, {
+      title: 'Booking Reschedule Ho Gayi',
+      body: `Naya session: ${newScheduledAt.toLocaleDateString('en-IN', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}`,
+      data: { type: 'booking_rescheduled', appointmentId },
+    })
+    this.pushNotificationService.sendToUser(appointment.astrologerId, {
+      title: 'Booking Reschedule Ho Gayi',
+      body: 'User ne apna slot change kar liya — naya time dekho',
+      data: { type: 'booking_rescheduled', appointmentId },
+    })
+
+    return { appointment: updated }
   }
 
   // ── Astrologer Schedule ────────────────────────────────────────────────────

@@ -334,6 +334,26 @@ export async function consultationRoutes(app: FastifyInstance) {
     bookingController.renewAgoraToken,
   )
 
+  // Reschedule — user ne cancel ke baad naya slot choose kiya
+  // Same astrologer, same service, same price, 1/booking + 1/week + 2/month limit
+  app.patch(
+    '/consultation/appointments/:id/reschedule',
+    {
+      preHandler: [authenticate],
+      schema: {
+        params: { type: 'object', properties: { id: { type: 'string' } } },
+        body: {
+          type: 'object',
+          required: ['newScheduledAt'],
+          properties: {
+            newScheduledAt: { type: 'string', format: 'date-time' },
+          },
+        },
+      },
+    },
+    bookingController.rescheduleAppointment,
+  )
+
   // ═══════════════════════════════════════════════════════════════════════════
   // SERVICE REQUEST ROUTES (mid-session upsell)
   // ═══════════════════════════════════════════════════════════════════════════

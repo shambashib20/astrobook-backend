@@ -29,6 +29,13 @@
       "when": 1791728007407,
       "tag": "0003_foamy_rage",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1791810428312,
+      "tag": "0004_perpetual_lightspeed",
+      "breakpoints": true
     }
   ]
 }

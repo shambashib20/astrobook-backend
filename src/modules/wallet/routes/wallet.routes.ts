@@ -2,6 +2,8 @@ import type { FastifyInstance } from 'fastify'
 import { getDb } from '@/core/database/client'
 import { authenticate } from '@/modules/auth'
 import { PaymentRepository } from '@/modules/payment/repositories/payment.repositary'
+import { AppointmentRepository } from '@/modules/consultation/repositories/appointment.repository'
+import { PushNotificationService } from '@/core/services/push-notification.service'
 import { WalletRepository } from '../repositories/wallet.repository'
 import { WalletService } from '../services/wallet.service'
 import { WalletController } from '../controllers/wallet.controller'
@@ -10,7 +12,9 @@ export async function walletRoutes(app: FastifyInstance) {
   const db = getDb()
   const walletRepo = new WalletRepository(db)
   const paymentRepo = new PaymentRepository(db)
-  const walletService = new WalletService(walletRepo, paymentRepo)
+  const appointmentRepo = new AppointmentRepository(db)
+  const pushService = new PushNotificationService(db)
+  const walletService = new WalletService(walletRepo, paymentRepo, appointmentRepo, pushService)
   const walletController = new WalletController(walletService)
 
   // GET /wallet/balance
@@ -95,5 +99,26 @@ export async function walletRoutes(app: FastifyInstance) {
       },
     },
     walletController.claimCancellation,
+  )
+
+  // POST /wallet/pay — appointment ko wallet se pay karke confirm karo
+  app.post(
+    '/wallet/pay',
+    {
+      preHandler: [authenticate],
+      schema: {
+        tags: ['Wallet'],
+        summary: 'Wallet se booking payment — balance >= price hona chahiye',
+        security: [{ bearerAuth: [] }],
+        body: {
+          type: 'object',
+          required: ['appointmentId'],
+          properties: {
+            appointmentId: { type: 'string', format: 'uuid' },
+          },
+        },
+      },
+    },
+    walletController.payWithWallet,
   )
 }

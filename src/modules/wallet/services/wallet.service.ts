@@ -1,8 +1,11 @@
 import Razorpay from 'razorpay'
 import { env } from '@/config/env'
 import { BadRequestError, ForbiddenError, NotFoundError } from '@/core/errors'
+import { AgoraService } from '@/modules/consultation/services/agora.service'
 import type { WalletRepository } from '../repositories/wallet.repository'
 import type { PaymentRepository } from '@/modules/payment/repositories/payment.repositary'
+import type { AppointmentRepository } from '@/modules/consultation/repositories/appointment.repository'
+import type { PushNotificationService } from '@/core/services/push-notification.service'
 
 const razorpay = new Razorpay({
   key_id: env.RAZORPAY_KEY_ID,
@@ -10,9 +13,13 @@ const razorpay = new Razorpay({
 })
 
 export class WalletService {
+  private readonly agoraService = new AgoraService()
+
   constructor(
     private readonly walletRepository: WalletRepository,
     private readonly paymentRepository: PaymentRepository,
+    private readonly appointmentRepository?: AppointmentRepository,
+    private readonly pushNotificationService?: PushNotificationService,
   ) {}
 
   // ── Balance ─────────────────────────────────────────────────────────────────
@@ -72,6 +79,76 @@ export class WalletService {
         description: 'Astrologer ne cancel kiya — wallet credit',
       })
       return this.walletRepository.updateStatus(requestId, 'credited')
+    }
+  }
+
+  // ── Pay with Wallet ─────────────────────────────────────────────────────────
+  // Full wallet pay: balance >= service price → debit wallet, confirm appointment
+
+  async payWithWallet(userId: string, appointmentId: string) {
+    if (!this.appointmentRepository) {
+      throw BadRequestError('Wallet pay service not configured')
+    }
+
+    const appointment = await this.appointmentRepository.findById(appointmentId)
+    if (!appointment) throw NotFoundError('Appointment not found')
+    if (appointment.userId !== userId) throw ForbiddenError('Not your appointment')
+    if (appointment.status !== 'pending') {
+      throw BadRequestError('Appointment is not in pending state')
+    }
+
+    // Price: appointment.price (booking-time snapshot) ya service price se
+    const appointmentWithDetails =
+      await this.appointmentRepository.findByIdWithDetails(appointmentId)
+    if (!appointmentWithDetails) throw NotFoundError('Appointment details not found')
+
+    const price = Number(
+      appointmentWithDetails.price ?? appointmentWithDetails.service.price,
+    )
+    if (!price || price <= 0) throw BadRequestError('Invalid service price')
+
+    // Balance check
+    const { balance } = await this.walletRepository.getBalance(userId)
+    if (Number(balance) < price) {
+      throw BadRequestError(
+        `Wallet balance (₹${balance}) is less than the required amount (₹${price})`,
+      )
+    }
+
+    // Debit wallet
+    await this.walletRepository.addDebit({
+      userId,
+      amount: String(price),
+      type: 'debit',
+      source: 'booking_payment',
+      description: `Session booked — ${appointmentWithDetails.service.title}`,
+    })
+
+    // Generate Agora token + confirm appointment
+    const { channel, token } = this.agoraService.generateToken(appointmentId)
+    const confirmed = await this.appointmentRepository.update(appointmentId, {
+      status: 'confirmed',
+      agoraChannel: channel,
+      agoraToken: token,
+    })
+
+    // Push notifications — both sides
+    if (this.pushNotificationService) {
+      this.pushNotificationService.sendToUser(userId, {
+        title: 'Booking Confirmed!',
+        body: 'Tumhari booking wallet se confirm ho gayi hai',
+        data: { type: 'booking_confirmed', appointmentId },
+      })
+      this.pushNotificationService.sendToUser(appointment.astrologerId, {
+        title: 'Naya Booking Mila',
+        body: `₹${price} wallet payment mila — naya booking confirm ho gaya`,
+        data: { type: 'new_booking', appointmentId },
+      })
+    }
+
+    return {
+      message: 'Payment successful',
+      appointment: confirmed,
     }
   }
 

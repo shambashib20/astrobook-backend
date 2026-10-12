@@ -25,6 +25,12 @@ export const cancellationRequestStatusEnum = pgEnum('cancellation_request_status
   'pending',
   'refunded',
   'credited',
+  'timing_changed', // User ne slot reschedule kiya — refund nahi, booking update ho gayi
+])
+
+export const cancellationInitiatedByEnum = pgEnum('cancellation_initiated_by', [
+  'astrologer', // Astrologer ne cancel kiya (2 options: refund | wallet)
+  'user',       // User ne cancel kiya (3 options: refund | wallet | timing_change)
 ])
 
 export const walletCreditTypeEnum = pgEnum('wallet_credit_type', ['credit', 'debit'])
@@ -223,6 +229,8 @@ export const appointments = pgTable(
   status: appointmentStatusEnum('status').notNull().default('pending'),
   // Jo party ne cancel kiya — astrologer ya user
   cancelledBy: cancelledByEnum('cancelled_by'),
+  // Ek booking sirf ek baar reschedule ho sakti hai (per-booking limit)
+  rescheduledCount: smallint('rescheduled_count').notNull().default(0),
   notes: text('notes'),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
@@ -510,6 +518,9 @@ export const cancellationRequests = pgTable(
     razorpayPaymentId: varchar('razorpay_payment_id', { length: 255 }).notNull(),
     razorpayOrderId: varchar('razorpay_order_id', { length: 255 }),
     status: cancellationRequestStatusEnum('status').notNull().default('pending'),
+    // Kisne cancel kiya — determines how many options to show user
+    // (astrologer cancel: 2 options; user cancel: 3 options incl. timing_change)
+    initiatedBy: cancellationInitiatedByEnum('initiated_by').notNull().default('astrologer'),
     expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),

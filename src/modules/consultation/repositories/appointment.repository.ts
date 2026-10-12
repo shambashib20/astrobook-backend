@@ -250,8 +250,11 @@ export class AppointmentRepository {
       bundleStatus: 'in_progress' | 'paused' | 'completed'
       agoraChannel: string
       agoraToken: string
+      scheduledAt: Date
+      endsAt: Date
       astrologerJoinedAt: Date
       cancelledBy: 'user' | 'astrologer'
+      rescheduledCount: number
     }>,
   ) {
     const [appointment] = await this.db
@@ -260,5 +263,31 @@ export class AppointmentRepository {
       .where(eq(appointments.id, id))
       .returning()
     return appointment ?? null
+  }
+
+  // Reschedule ke weekly/monthly limits check karne ke liye — yahan nahi,
+  // wallet.repository mein timing_changed cancellation_requests count hote hain.
+  // Per-booking limit check: rescheduledCount >= 1 matlab ek baar ho chuka hai.
+
+  // Conflict check for a new slot — same as findConfirmedByAstrologerInRange
+  // but excludes the current appointment itself (self-reschedule)
+  async findConflictsExcluding(
+    astrologerId: string,
+    rangeStart: Date,
+    rangeEnd: Date,
+    excludeAppointmentId: string,
+  ) {
+    return this.db
+      .select()
+      .from(appointments)
+      .where(
+        and(
+          eq(appointments.astrologerId, astrologerId),
+          inArray(appointments.status, ['pending', 'confirmed', 'ongoing']),
+          lt(appointments.scheduledAt, rangeEnd),
+          gt(appointments.endsAt, rangeStart),
+          sql`${appointments.id} != ${excludeAppointmentId}`,
+        ),
+      )
   }
 }
