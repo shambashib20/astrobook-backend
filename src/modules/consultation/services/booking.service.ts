@@ -1,5 +1,3 @@
-import Razorpay from 'razorpay'
-import { env } from '@/config/env'
 import { BadRequestError, ConflictError, ForbiddenError, NotFoundError } from '@/core/errors'
 import { PENDING_BOOKING_TIMEOUT_MS } from '@/core/utils/cron-heartbeat'
 import type { AppointmentRepository } from '../repositories/appointment.repository'
@@ -12,18 +10,11 @@ import type { CreateBookingDto } from '../schemas/consultation.schema'
 import type { Appointment } from '@/core/database/schema'
 import { CANCELLATION_CHOICE_WINDOW_MS } from '@/core/database/schema'
 
-const razorpay = new Razorpay({
-  key_id: env.RAZORPAY_KEY_ID,
-  key_secret: env.RAZORPAY_KEY_SECRET,
-})
-
-// User apni CONFIRMED (paid) booking cancel kare to refund/choice sirf tab
-// milta hai jab session shuru hone mein abhi 24+ ghante baaki hon. Isse kam
-// waqt pe cancel kiya (ya session miss kiya / incomplete chhoda) to koi
-// choice nahi — support se contact karo.
-// NOTE: yeh sirf USER-cancel pe lagta hai — astrologer cancel pe hamesha
-// full refund hota hai (astrologer ki galti).
-const USER_CANCEL_REFUND_WINDOW_MS = 24 * 60 * 60 * 1000 // 24 hours
+// Booking banane ke 10 minute tak FREE cancel window — koi deduction nahi.
+// Iske baad cancel kiya toh ₹50 processing fee lagegi.
+const FREE_CANCEL_WINDOW_MS = 10 * 60 * 1000  // 10 minutes
+const CANCEL_DEDUCTION_AMOUNT = 50             // ₹50 after free window
+const USER_CHOICE_WINDOW_MS = 24 * 60 * 60 * 1000 // 1 day to choose refund type
 
 // Reschedule per-week limit: 1; per-month limit: 2
 const RESCHEDULE_WEEKLY_LIMIT = 1
@@ -342,7 +333,11 @@ export class BookingService {
     const wasConfirmedPaid = appointment.status === 'confirmed'
     const isAstrologerCancelling = requesterId === appointment.astrologerId
 
-    // Appointment cancel + cancelledBy record karo
+    // ── User cancel: koi time-based block nahi — sirf deduction rule ────────
+    // Booking ke 10 min ke andar → ₹0 deduction (full refund)
+    // Iske baad → ₹50 processing fee
+
+    // Appointment cancel karo
     const updated = await this.appointmentRepository.update(appointmentId, {
       status: 'cancelled',
       cancelledBy: isAstrologerCancelling ? 'astrologer' : 'user',
@@ -351,93 +346,64 @@ export class BookingService {
     // Refund logic — sirf jab booking CONFIRMED (paid) thi
     if (wasConfirmedPaid) {
       const payment = await this.paymentRepository.findByAppointmentId(appointmentId)
-      const msUntilSession = appointment.scheduledAt.getTime() - Date.now()
 
       if (isAstrologerCancelling) {
         // ── Astrologer cancel ────────────────────────────────────────────────
-        // Hamesha user ko full refund milega — lekin immediate nahi. User ko
-        // 24h window dete hain ki wo decide kare: Razorpay refund (7 business
-        // days) ya AstroBook wallet credit (instant). Agar 24h mein koi action
-        // nahi toh cron auto-refund kar deta hai (wallet.service.ts).
-        if (payment?.status === 'success' && payment.razorpayPaymentId) {
-          const expiresAt = new Date(Date.now() + CANCELLATION_CHOICE_WINDOW_MS)
-          try {
-            await this.walletRepository.createCancellationRequest({
-              appointmentId,
-              userId: appointment.userId,
-              amount: payment.amount,
-              razorpayPaymentId: payment.razorpayPaymentId,
-              razorpayOrderId: payment.razorpayOrderId ?? undefined,
-              expiresAt,
-            })
+        // Hamesha full refund — deduction nahi. User ko 1 din ka window dete
+        // hain choose karne ke liye (money refund ya wallet credit). Admin approve karega.
+        if (payment?.status === 'success') {
+          const expiresAt = new Date(Date.now() + USER_CHOICE_WINDOW_MS)
+          await this.walletRepository.createCancellationRequest({
+            appointmentId,
+            userId: appointment.userId,
+            amount: payment.amount,
+            razorpayPaymentId: payment.razorpayPaymentId ?? undefined,
+            razorpayOrderId: payment.razorpayOrderId ?? undefined,
+            deductionAmount: 0,
+            initiatedBy: 'astrologer',
+            expiresAt,
+          })
 
-            // User ko choice notification bhejo
-            this.pushNotificationService.sendToUser(appointment.userId, {
-              title: 'Astrologer Ne Cancel Kiya',
-              body: 'Refund ya wallet credit — 24h mein choose karo. Baad mein auto-refund hoga.',
-              data: {
-                type: 'astrologer_cancelled_choice',
-                appointmentId,
-              },
-            })
-          } catch {
-            // DB fail — fallback: immediate refund
-            try {
-              await razorpay.payments.refund(payment.razorpayPaymentId, {})
-              if (payment.razorpayOrderId) {
-                await this.paymentRepository.updateByOrderId(payment.razorpayOrderId, {
-                  status: 'refunded',
-                })
-              }
-            } catch {
-              // Razorpay bhi fail — admin manual refund karega
-            }
-            this.pushNotificationService.sendToUser(appointment.userId, {
-              title: 'Astrologer Ne Cancel Kiya',
-              body: 'Tumhara poora paisa refund ho raha hai',
-              data: { type: 'astrologer_cancelled_refund', appointmentId },
-            })
-          }
+          this.pushNotificationService.sendToUser(appointment.userId, {
+            title: 'Astrologer Ne Cancel Kiya',
+            body: 'Refund ya wallet credit — 1 din mein choose karo',
+            data: { type: 'astrologer_cancelled_choice', appointmentId },
+          })
         }
       } else {
         // ── User cancel ──────────────────────────────────────────────────────
-        // Session shuru hone mein 24+ ghante baaki hain toh user ko choice
-        // milta hai: Refund (7 days) | Wallet Credit (instant) | Timing Change.
-        // 24h se kam waqt pe cancel kiya toh koi choice nahi — support contact.
-        const eligibleForChoice = msUntilSession >= USER_CANCEL_REFUND_WINDOW_MS
+        // 10 min ke andar → ₹0 deduction; baad mein → ₹50 deduction.
+        // Dono cases mein cancellation_request create hoti hai — admin queue.
+        if (payment?.status === 'success') {
+          const msSinceBooking = Date.now() - new Date(appointment.createdAt).getTime()
+          const deductionAmount = msSinceBooking <= FREE_CANCEL_WINDOW_MS ? 0 : CANCEL_DEDUCTION_AMOUNT
+          const expiresAt = new Date(Date.now() + USER_CHOICE_WINDOW_MS)
 
-        if (eligibleForChoice && payment?.status === 'success' && payment.razorpayPaymentId) {
-          try {
-            const expiresAt = new Date(Date.now() + CANCELLATION_CHOICE_WINDOW_MS)
-            await this.walletRepository.createCancellationRequest({
-              appointmentId,
-              userId: appointment.userId,
-              amount: payment.amount,
-              razorpayPaymentId: payment.razorpayPaymentId,
-              razorpayOrderId: payment.razorpayOrderId ?? undefined,
-              initiatedBy: 'user',
-              expiresAt,
-            })
+          await this.walletRepository.createCancellationRequest({
+            appointmentId,
+            userId: appointment.userId,
+            amount: payment.amount,
+            razorpayPaymentId: payment.razorpayPaymentId ?? undefined,
+            razorpayOrderId: payment.razorpayOrderId ?? undefined,
+            deductionAmount,
+            initiatedBy: 'user',
+            expiresAt,
+          })
 
-            // User ko choice sheet ke liye notify karo
-            this.pushNotificationService.sendToUser(requesterId, {
-              title: 'Booking Cancel Ho Gayi',
-              body: 'Refund, wallet credit, ya slot change — 24h mein choose karo',
-              data: { type: 'user_cancelled_choice', appointmentId },
-            })
-          } catch {
-            // DB fail — simple cancel notification
-            this.pushNotificationService.sendToUser(requesterId, {
-              title: 'Booking Cancel Ho Gayi',
-              body: 'Tumhari booking cancel ho gayi hai',
-              data: { type: 'booking_cancelled_self', appointmentId, refunded: 'false' },
-            })
-          }
-        } else {
-          // 24h window khatam — no refund, contact support
+          const bodyMsg = deductionAmount > 0
+            ? `₹${deductionAmount} processing fee lagegi — refund ya wallet credit choose karo (1 din ka time hai)`
+            : 'Refund ya wallet credit — 1 din mein choose karo'
+
           this.pushNotificationService.sendToUser(requesterId, {
             title: 'Booking Cancel Ho Gayi',
-            body: 'Session 24 ghante se kam dur tha — refund possible nahi. Help ke liye support se contact karo.',
+            body: bodyMsg,
+            data: { type: 'user_cancelled_choice', appointmentId },
+          })
+        } else {
+          // Unpaid / payment not found
+          this.pushNotificationService.sendToUser(requesterId, {
+            title: 'Booking Cancel Ho Gayi',
+            body: 'Tumhari booking cancel ho gayi hai',
             data: { type: 'booking_cancelled_self', appointmentId, refunded: 'false' },
           })
         }

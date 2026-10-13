@@ -10,6 +10,7 @@ import {
   text,
   smallint,
   numeric,
+  integer,
   pgEnum,
   unique,
   jsonb,
@@ -25,7 +26,11 @@ export const cancellationRequestStatusEnum = pgEnum('cancellation_request_status
   'pending',
   'refunded',
   'credited',
-  'timing_changed', // User ne slot reschedule kiya — refund nahi, booking update ho gayi
+  'timing_changed',       // User ne slot reschedule kiya — refund nahi, booking update ho gayi
+  'admin_pending_money',  // User ne money refund choose kiya — admin queue mein
+  'admin_pending_wallet', // User ne wallet credit choose kiya — admin queue mein
+  'admin_approved',       // Admin ne approve kiya (intermediate step log ke liye)
+  'admin_rejected',       // Admin ne reject kiya
 ])
 
 export const cancellationInitiatedByEnum = pgEnum('cancellation_initiated_by', [
@@ -514,9 +519,14 @@ export const cancellationRequests = pgTable(
       .notNull()
       .references(() => users.id, { onDelete: 'cascade' }),
     amount: numeric('amount', { precision: 10, scale: 2 }).notNull(),
-    // Razorpay refs — needed to issue the actual refund
-    razorpayPaymentId: varchar('razorpay_payment_id', { length: 255 }).notNull(),
+    // Razorpay refs — nullable ab: user-cancel ke liye required nahi;
+    // astrologer-cancel ke liye backward compat ke liye rakha
+    razorpayPaymentId: varchar('razorpay_payment_id', { length: 255 }),
     razorpayOrderId: varchar('razorpay_order_id', { length: 255 }),
+    // 0 = free window (booking ke 10 min ke andar cancel); 50 = after 10 min
+    deductionAmount: integer('deduction_amount').notNull().default(0),
+    // User ka UPI ID — money refund choose karne pe fill hota hai
+    upiId: varchar('upi_id', { length: 255 }),
     status: cancellationRequestStatusEnum('status').notNull().default('pending'),
     // Kisne cancel kiya — determines how many options to show user
     // (astrologer cancel: 2 options; user cancel: 3 options incl. timing_change)

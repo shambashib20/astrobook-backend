@@ -1,16 +1,9 @@
-import Razorpay from 'razorpay'
-import { env } from '@/config/env'
 import { BadRequestError, ForbiddenError, NotFoundError } from '@/core/errors'
 import { AgoraService } from '@/modules/consultation/services/agora.service'
 import type { WalletRepository } from '../repositories/wallet.repository'
 import type { PaymentRepository } from '@/modules/payment/repositories/payment.repositary'
 import type { AppointmentRepository } from '@/modules/consultation/repositories/appointment.repository'
 import type { PushNotificationService } from '@/core/services/push-notification.service'
-
-const razorpay = new Razorpay({
-  key_id: env.RAZORPAY_KEY_ID,
-  key_secret: env.RAZORPAY_KEY_SECRET,
-})
 
 export class WalletService {
   private readonly agoraService = new AgoraService()
@@ -40,12 +33,27 @@ export class WalletService {
     return this.walletRepository.findPendingByUser(userId)
   }
 
+  // ── Get cancellation request by appointment (for booking detail page) ───────
+  // Any status — user dekhega ki refund kahan tak pahuncha
+
+  async getCancellationByAppointment(appointmentId: string, userId: string) {
+    const req = await this.walletRepository.findByAppointmentId(appointmentId)
+    if (!req) return null
+    // Security: sirf apni request
+    if (req.userId !== userId) throw ForbiddenError('Not your cancellation request')
+    return req
+  }
+
   // ── Claim — user chooses refund or wallet credit ────────────────────────────
+  // Ab Razorpay nahi — admin queue mein request jaati hai.
+  // money → admin manually UPI pe transfer karega
+  // wallet → admin approve karega, tab wallet credit hoga
 
   async claimCancellation(
     requestId: string,
     userId: string,
     action: 'refund' | 'wallet',
+    upiId?: string,
   ) {
     const req = await this.walletRepository.findById(requestId)
     if (!req) throw NotFoundError('Cancellation request not found')
@@ -54,32 +62,112 @@ export class WalletService {
 
     const now = new Date()
     if (req.expiresAt < now) {
-      throw BadRequestError(
-        'Choice window expired — auto-refund will process shortly',
-      )
+      throw BadRequestError('Choice window expired — auto-refund process ho raha hai')
     }
 
     if (action === 'refund') {
-      // Razorpay refund
-      await razorpay.payments.refund(req.razorpayPaymentId, {})
-      if (req.razorpayOrderId) {
-        await this.paymentRepository.updateByOrderId(req.razorpayOrderId, {
-          status: 'refunded',
-        })
+      if (!upiId?.trim()) {
+        throw BadRequestError('UPI ID required for money refund')
       }
-      return this.walletRepository.updateStatus(requestId, 'refunded')
+      // Admin queue mein bhejo — admin manually transfer karega
+      await this.walletRepository.updateCancellationFields(requestId, {
+        status: 'admin_pending_money',
+        upiId: upiId.trim(),
+      })
+      this.pushNotificationService?.sendToUser(userId, {
+        title: 'Refund Request Submit Ho Gayi',
+        body: '2 din mein tumhare UPI pe aa jaayega',
+        data: { type: 'refund_request_submitted', requestId },
+      })
     } else {
-      // AstroBook wallet credit
+      // Wallet — admin approve karega, tab credit hoga
+      await this.walletRepository.updateCancellationFields(requestId, {
+        status: 'admin_pending_wallet',
+      })
+      this.pushNotificationService?.sendToUser(userId, {
+        title: 'Wallet Credit Request Submit Ho Gayi',
+        body: 'Admin approve karte hi wallet mein aa jaayega',
+        data: { type: 'wallet_request_submitted', requestId },
+      })
+    }
+
+    return this.walletRepository.findById(requestId)
+  }
+
+  // ── Admin: List all requests ────────────────────────────────────────────────
+
+  async getAdminCancellationRequests(filter?: 'pending' | 'all') {
+    return this.walletRepository.findAllForAdmin(filter)
+  }
+
+  // ── Admin: Approve ─────────────────────────────────────────────────────────
+
+  async approveAdminCancellation(requestId: string) {
+    const req = await this.walletRepository.findById(requestId)
+    if (!req) throw NotFoundError('Cancellation request not found')
+
+    if (
+      req.status !== 'admin_pending_money' &&
+      req.status !== 'admin_pending_wallet'
+    ) {
+      throw BadRequestError(`Cannot approve request with status: ${req.status}`)
+    }
+
+    const netAmount = Number(req.amount) - (req.deductionAmount ?? 0)
+
+    if (req.status === 'admin_pending_wallet') {
+      // Wallet credit karo
       await this.walletRepository.addCredit({
-        userId,
-        amount: req.amount,
+        userId: req.userId,
+        amount: String(netAmount),
         type: 'credit',
         source: 'cancellation_refund',
         cancellationRequestId: requestId,
-        description: 'Astrologer ne cancel kiya — wallet credit',
+        description: 'Cancellation refund — wallet credit',
       })
-      return this.walletRepository.updateStatus(requestId, 'credited')
+      await this.walletRepository.updateCancellationFields(requestId, { status: 'credited' })
+
+      this.pushNotificationService?.sendToUser(req.userId, {
+        title: 'Wallet Credit Ho Gaya!',
+        body: `₹${netAmount} tumhare AstroBook wallet mein aa gaya`,
+        data: { type: 'wallet_credited', requestId },
+      })
+    } else {
+      // money — status update; admin ne already UPI transfer kar diya
+      await this.walletRepository.updateCancellationFields(requestId, { status: 'refunded' })
+
+      this.pushNotificationService?.sendToUser(req.userId, {
+        title: 'Refund Process Ho Gaya',
+        body: `₹${netAmount} tumhare UPI pe bhej diya gaya hai`,
+        data: { type: 'refund_processed', requestId },
+      })
     }
+
+    return this.walletRepository.findById(requestId)
+  }
+
+  // ── Admin: Reject ──────────────────────────────────────────────────────────
+
+  async rejectAdminCancellation(requestId: string, reason?: string) {
+    const req = await this.walletRepository.findById(requestId)
+    if (!req) throw NotFoundError('Cancellation request not found')
+
+    if (
+      req.status !== 'admin_pending_money' &&
+      req.status !== 'admin_pending_wallet'
+    ) {
+      throw BadRequestError(`Cannot reject request with status: ${req.status}`)
+    }
+
+    await this.walletRepository.updateCancellationFields(requestId, { status: 'admin_rejected' })
+
+    this.pushNotificationService?.sendToUser(req.userId, {
+      title: 'Refund Request Reject Ho Gayi',
+      body: reason ?? 'Zyada jankari ke liye support se contact karo',
+      data: { type: 'refund_rejected', requestId },
+    })
+
+    return this.walletRepository.findById(requestId)
   }
 
   // ── Pay with Wallet ─────────────────────────────────────────────────────────
@@ -97,7 +185,6 @@ export class WalletService {
       throw BadRequestError('Appointment is not in pending state')
     }
 
-    // Price: appointment.price (booking-time snapshot) ya service price se
     const appointmentWithDetails =
       await this.appointmentRepository.findByIdWithDetails(appointmentId)
     if (!appointmentWithDetails) throw NotFoundError('Appointment details not found')
@@ -107,7 +194,6 @@ export class WalletService {
     )
     if (!price || price <= 0) throw BadRequestError('Invalid service price')
 
-    // Balance check
     const { balance } = await this.walletRepository.getBalance(userId)
     if (Number(balance) < price) {
       throw BadRequestError(
@@ -115,7 +201,6 @@ export class WalletService {
       )
     }
 
-    // Debit wallet
     await this.walletRepository.addDebit({
       userId,
       amount: String(price),
@@ -124,7 +209,6 @@ export class WalletService {
       description: `Session booked — ${appointmentWithDetails.service.title}`,
     })
 
-    // Generate Agora token + confirm appointment
     const { channel, token } = this.agoraService.generateToken(appointmentId)
     const confirmed = await this.appointmentRepository.update(appointmentId, {
       status: 'confirmed',
@@ -132,7 +216,6 @@ export class WalletService {
       agoraToken: token,
     })
 
-    // Push notifications — both sides
     if (this.pushNotificationService) {
       this.pushNotificationService.sendToUser(userId, {
         title: 'Booking Confirmed!',
@@ -152,9 +235,9 @@ export class WalletService {
     }
   }
 
-  // ── Auto-refund Sweep (cron-triggered) ─────────────────────────────────────
-  // Har 5 min chalta hai — jo 24h window mein user ne kuch nahi kiya unhe
-  // auto-refund kar do. Error pe skip karo (next sweep mein dobara try).
+  // ── Auto-claim Sweep (cron-triggered) ──────────────────────────────────────
+  // Har 5 min chalta hai — jo 1 din window mein user ne kuch nahi kiya unhe
+  // auto admin_pending_money queue mein daal do (UPI null — admin contact karega).
 
   async processExpiredCancellations(): Promise<number> {
     const now = new Date()
@@ -163,13 +246,16 @@ export class WalletService {
 
     for (const req of expired) {
       try {
-        await razorpay.payments.refund(req.razorpayPaymentId, {})
-        if (req.razorpayOrderId) {
-          await this.paymentRepository.updateByOrderId(req.razorpayOrderId, {
-            status: 'refunded',
-          })
-        }
-        await this.walletRepository.updateStatus(req.id, 'refunded')
+        await this.walletRepository.updateCancellationFields(req.id, {
+          status: 'admin_pending_money',
+        })
+
+        this.pushNotificationService?.sendToUser(req.userId, {
+          title: 'Time Expire Ho Gaya',
+          body: 'Admin se refund process ho raha hai — jald hi UPI pe aa jaayega',
+          data: { type: 'auto_refund_queued', requestId: req.id },
+        })
+
         processed++
       } catch {
         // Log hoga server.ts mein — yahan silent continue

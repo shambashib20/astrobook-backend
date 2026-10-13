@@ -1,6 +1,6 @@
-import { and, desc, eq, gt, lt, sql } from 'drizzle-orm'
+import { and, desc, eq, gt, inArray, lt, sql } from 'drizzle-orm'
 import type { Database } from '@/core/database/client'
-import { appointments, cancellationRequests, walletCredits } from '@/core/database/schema'
+import { appointments, cancellationRequests, users, walletCredits } from '@/core/database/schema'
 import type { NewCancellationRequest, NewWalletCredit } from '@/core/database/schema'
 
 export class WalletRepository {
@@ -49,6 +49,7 @@ export class WalletRepository {
         appointmentId: cancellationRequests.appointmentId,
         userId: cancellationRequests.userId,
         amount: cancellationRequests.amount,
+        deductionAmount: cancellationRequests.deductionAmount,
         razorpayPaymentId: cancellationRequests.razorpayPaymentId,
         razorpayOrderId: cancellationRequests.razorpayOrderId,
         status: cancellationRequests.status,
@@ -75,6 +76,7 @@ export class WalletRepository {
       appointmentId: r.appointmentId,
       userId: r.userId,
       amount: r.amount,
+      deductionAmount: String(r.deductionAmount ?? 0),
       razorpayPaymentId: r.razorpayPaymentId,
       razorpayOrderId: r.razorpayOrderId,
       status: r.status,
@@ -101,13 +103,91 @@ export class WalletRepository {
     return req ?? null
   }
 
-  async updateStatus(id: string, status: 'pending' | 'refunded' | 'credited' | 'timing_changed') {
+  // Kisi bhi appointment ke liye latest cancellation request (status ke bawajood)
+  async findByAppointmentId(appointmentId: string) {
+    const [req] = await this.db
+      .select()
+      .from(cancellationRequests)
+      .where(eq(cancellationRequests.appointmentId, appointmentId))
+      .orderBy(desc(cancellationRequests.createdAt))
+      .limit(1)
+    return req ?? null
+  }
+
+  async updateStatus(
+    id: string,
+    status:
+      | 'pending'
+      | 'refunded'
+      | 'credited'
+      | 'timing_changed'
+      | 'admin_pending_money'
+      | 'admin_pending_wallet'
+      | 'admin_approved'
+      | 'admin_rejected',
+  ) {
     const [req] = await this.db
       .update(cancellationRequests)
       .set({ status, updatedAt: sql`now()` })
       .where(eq(cancellationRequests.id, id))
       .returning()
     return req ?? null
+  }
+
+  // Update status and/or upiId in one shot
+  async updateCancellationFields(
+    id: string,
+    fields: {
+      status?:
+        | 'pending'
+        | 'refunded'
+        | 'credited'
+        | 'timing_changed'
+        | 'admin_pending_money'
+        | 'admin_pending_wallet'
+        | 'admin_approved'
+        | 'admin_rejected'
+      upiId?: string
+    },
+  ) {
+    const set: Record<string, unknown> = { updatedAt: sql`now()` }
+    if (fields.status !== undefined) set['status'] = fields.status
+    if (fields.upiId !== undefined) set['upiId'] = fields.upiId
+    const [req] = await this.db
+      .update(cancellationRequests)
+      .set(set as any)
+      .where(eq(cancellationRequests.id, id))
+      .returning()
+    return req ?? null
+  }
+
+  // Admin: all requests (optionally filter by pending/all)
+  async findAllForAdmin(filter?: 'pending' | 'all') {
+    const rows = await this.db
+      .select({
+        id: cancellationRequests.id,
+        appointmentId: cancellationRequests.appointmentId,
+        userId: cancellationRequests.userId,
+        userName: users.name,
+        amount: cancellationRequests.amount,
+        deductionAmount: cancellationRequests.deductionAmount,
+        upiId: cancellationRequests.upiId,
+        status: cancellationRequests.status,
+        initiatedBy: cancellationRequests.initiatedBy,
+        expiresAt: cancellationRequests.expiresAt,
+        createdAt: cancellationRequests.createdAt,
+        updatedAt: cancellationRequests.updatedAt,
+      })
+      .from(cancellationRequests)
+      .leftJoin(users, eq(users.id, cancellationRequests.userId))
+      .where(
+        filter === 'pending'
+          ? inArray(cancellationRequests.status, ['admin_pending_money', 'admin_pending_wallet'])
+          : undefined,
+      )
+      .orderBy(desc(cancellationRequests.createdAt))
+
+    return rows
   }
 
   // Ek appointment ke liye pending request (user reschedule ke waqt close karne ke liye)

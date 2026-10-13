@@ -1,6 +1,6 @@
 import type { FastifyInstance } from 'fastify'
 import { getDb } from '@/core/database/client'
-import { authenticate } from '@/modules/auth'
+import { authenticate, requireRole } from '@/modules/auth'
 import { PaymentRepository } from '@/modules/payment/repositories/payment.repositary'
 import { AppointmentRepository } from '@/modules/consultation/repositories/appointment.repository'
 import { PushNotificationService } from '@/core/services/push-notification.service'
@@ -73,6 +73,28 @@ export async function walletRoutes(app: FastifyInstance) {
     walletController.getPendingCancellations,
   )
 
+  // GET /wallet/cancellation-request/by-appointment/:appointmentId
+  // Booking detail page ke liye — current refund status fetch karo
+  app.get(
+    '/wallet/cancellation-request/by-appointment/:appointmentId',
+    {
+      preHandler: [authenticate],
+      schema: {
+        tags: ['Wallet'],
+        summary: 'Get cancellation request for a specific appointment (any status)',
+        security: [{ bearerAuth: [] }],
+        params: {
+          type: 'object',
+          required: ['appointmentId'],
+          properties: {
+            appointmentId: { type: 'string', format: 'uuid' },
+          },
+        },
+      },
+    },
+    walletController.getCancellationByAppointment,
+  )
+
   // POST /wallet/cancellation-requests/:requestId/claim
   app.post(
     '/wallet/cancellation-requests/:requestId/claim',
@@ -94,11 +116,78 @@ export async function walletRoutes(app: FastifyInstance) {
           required: ['action'],
           properties: {
             action: { type: 'string', enum: ['refund', 'wallet'] },
+            upiId: { type: 'string' }, // Required when action = 'refund'
           },
         },
       },
     },
     walletController.claimCancellation,
+  )
+
+  // ── Admin routes ─────────────────────────────────────────────────────────
+
+  // GET /admin/cancellation-requests
+  app.get(
+    '/admin/cancellation-requests',
+    {
+      preHandler: [authenticate, requireRole(['admin'])],
+      schema: {
+        tags: ['Admin'],
+        summary: 'List cancellation/refund requests',
+        security: [{ bearerAuth: [] }],
+        querystring: {
+          type: 'object',
+          properties: {
+            filter: { type: 'string', enum: ['pending', 'all'] },
+          },
+        },
+      },
+    },
+    walletController.adminListRequests,
+  )
+
+  // PATCH /admin/cancellation-requests/:requestId/approve
+  app.patch(
+    '/admin/cancellation-requests/:requestId/approve',
+    {
+      preHandler: [authenticate, requireRole(['admin'])],
+      schema: {
+        tags: ['Admin'],
+        summary: 'Approve a cancellation request (credit wallet or mark refunded)',
+        security: [{ bearerAuth: [] }],
+        params: {
+          type: 'object',
+          required: ['requestId'],
+          properties: { requestId: { type: 'string', format: 'uuid' } },
+        },
+      },
+    },
+    walletController.adminApproveRequest,
+  )
+
+  // PATCH /admin/cancellation-requests/:requestId/reject
+  app.patch(
+    '/admin/cancellation-requests/:requestId/reject',
+    {
+      preHandler: [authenticate, requireRole(['admin'])],
+      schema: {
+        tags: ['Admin'],
+        summary: 'Reject a cancellation request',
+        security: [{ bearerAuth: [] }],
+        params: {
+          type: 'object',
+          required: ['requestId'],
+          properties: { requestId: { type: 'string', format: 'uuid' } },
+        },
+        body: {
+          type: 'object',
+          properties: {
+            reason: { type: 'string' },
+          },
+        },
+      },
+    },
+    walletController.adminRejectRequest,
   )
 
   // POST /wallet/pay — appointment ko wallet se pay karke confirm karo
