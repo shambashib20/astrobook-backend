@@ -1,6 +1,7 @@
 import ImageKit from 'imagekit'
 import { env } from '@/config/env'
 import { BadRequestError, ForbiddenError, NotFoundError } from '@/core/errors'
+import { checkProfanityBulk } from '@/core/utils/profanity'
 import type { PostsRepository } from '../repositories/posts.repository'
 import type { CreatePostDto, CreateCommentDto, UpdatePostDto } from '../schemas/posts.schema'
 import type { UserRepository } from '@/modules/users/repositories/user.repository'
@@ -29,6 +30,14 @@ export class PostsService {
     if (dto.mediaType === 'VIDEO' && !dto.durationSeconds) {
       throw BadRequestError('Video post ke liye durationSeconds zaroori hai')
     }
+
+    const profanity = checkProfanityBulk([dto.content, ...(dto.tags ?? [])])
+    if (!profanity.clean) {
+      throw BadRequestError(
+        `Post contains inappropriate content: ${profanity.matches.join(', ')}`,
+      )
+    }
+
     return this.postsRepository.create({
       astrologerId,
       content: dto.content,
@@ -116,6 +125,16 @@ export class PostsService {
     if (!post) throw NotFoundError('Post not found')
     if (post.astrologerId !== userId) throw ForbiddenError('Tumhara post nahi hai')
 
+    const partsToCheck = [dto.content, ...(dto.tags ?? [])].filter(Boolean) as string[]
+    if (partsToCheck.length > 0) {
+      const profanity = checkProfanityBulk(partsToCheck)
+      if (!profanity.clean) {
+        throw BadRequestError(
+          `Post contains inappropriate content: ${profanity.matches.join(', ')}`,
+        )
+      }
+    }
+
     const isText = post.mediaType === 'TEXT'
     await this.postsRepository.update(postId, {
       content: dto.content,
@@ -165,6 +184,14 @@ export class PostsService {
   async addComment(postId: string, userId: string, dto: CreateCommentDto) {
     const post = await this.postsRepository.findById(postId)
     if (!post) throw NotFoundError('Post not found')
+
+    const profanity = checkProfanityBulk([dto.content])
+    if (!profanity.clean) {
+      throw BadRequestError(
+        `Comment contains inappropriate content: ${profanity.matches.join(', ')}`,
+      )
+    }
+
     return this.postsRepository.addComment({ postId, userId, content: dto.content })
   }
 
