@@ -34,7 +34,7 @@ export const SETTLEMENT_INTERVAL_MS = 24 * 60 * 60 * 1000
 // nahi maani ja sakti. Har 5 min mein check karte hain, 20 min se purani
 // pending bookings ko cancel kar dete hain (slot release ho jaata hai).
 export const STALE_PENDING_CLEANUP_JOB = 'stale-pending-cleanup'
-export const STALE_PENDING_CLEANUP_INTERVAL_MS = 5 * 60 * 1000
+export const STALE_PENDING_CLEANUP_INTERVAL_MS = 15 * 60 * 1000
 export const PENDING_BOOKING_TIMEOUT_MS = 20 * 60 * 1000
 
 // Missed sessions — booking 'confirmed' thi, payment ho chuka tha, lekin
@@ -43,14 +43,14 @@ export const PENDING_BOOKING_TIMEOUT_MS = 20 * 60 * 1000
 // no-show maana jaata hai — refund + notify. Grace period isliye taaki
 // astrologer ka join request in-flight ho to galti se missed na ban jaaye.
 export const MISSED_SESSION_JOB = 'missed-session-refund'
-export const MISSED_SESSION_SWEEP_INTERVAL_MS = 5 * 60 * 1000
+export const MISSED_SESSION_SWEEP_INTERVAL_MS = 15 * 60 * 1000
 export const MISSED_SESSION_GRACE_MS = 5 * 60 * 1000
 
 // Cancellation choice window auto-refund — jab astrologer cancel karta hai,
 // user ke paas 24h hota hai refund ya wallet credit choose karne ke liye.
 // Is sweep mein expired + pending requests ko auto-refund karte hain.
 export const CANCELLATION_SWEEP_JOB = 'cancellation-auto-refund'
-export const CANCELLATION_SWEEP_INTERVAL_MS = 5 * 60 * 1000
+export const CANCELLATION_SWEEP_INTERVAL_MS = 15 * 60 * 1000
 
 type JobState = {
   lastRunAt: Date | null

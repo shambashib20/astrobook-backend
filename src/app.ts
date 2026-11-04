@@ -17,6 +17,7 @@ import { followsRoutes } from './modules/follows'
 import { notificationsRoutes } from './modules/notifications'
 import { youtubeRoutes } from './modules/youtube'
 import { walletRoutes } from './modules/wallet/routes/wallet.routes'
+import { kundliRoutes } from './modules/kundli'
 import { wakeSessionSweep } from './core/services/session-sweep-scheduler'
 
 export async function buildApp() {
@@ -128,5 +129,6 @@ export async function buildApp() {
   await app.register(adminRoutes, { prefix: apiPrefix })
   await app.register(youtubeRoutes, { prefix: apiPrefix })
   await app.register(walletRoutes, { prefix: apiPrefix })
+  await app.register(kundliRoutes, { prefix: apiPrefix })
   return app
 }

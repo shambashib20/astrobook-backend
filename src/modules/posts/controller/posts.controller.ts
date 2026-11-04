@@ -73,9 +73,10 @@ export class PostsController {
     return reply.send({ success: true })
   }
 
-  // GET /posts/upload-token — ImageKit signed token
+  // GET /posts/upload-token — ImageKit signed token (no-store to prevent browser caching same token)
   getUploadToken = async (_request: FastifyRequest, reply: FastifyReply) => {
     const token = this.postsService.getImageKitAuthToken()
+    reply.header('Cache-Control', 'no-store')
     return reply.send({ success: true, data: token })
   }
 

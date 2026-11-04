@@ -45,6 +45,11 @@ export const UpdateProfileSchema = z.object({
   interests:   interestsField,
   avatarUrl:   z.string().url().optional(),
   bio:         z.string().max(500).optional(),
+  // ── Kundli ke liye birth details ────────────────────────────────────────────
+  birthTime:  z.string().regex(/^\d{2}:\d{2}(:\d{2})?$/, 'Format: HH:MM ya HH:MM:SS').optional(),
+  birthPlace: z.string().min(2).max(255).optional(),
+  birthLat:   z.number().min(-90).max(90).optional(),
+  birthLng:   z.number().min(-180).max(180).optional(),
 })
 
 // Astrologer bannе ke liye application — koi role/isAstrologer yahan se
@@ -154,6 +159,19 @@ export const VerifyPhoneOtpSchema = z.object({
   otp:   z.string().length(4, 'OTP 4 digits ka hona chahiye'),
 })
 export type VerifyPhoneOtpDto = z.infer<typeof VerifyPhoneOtpSchema>
+
+// PATCH /users/me/astrologer-profile — admin khud ke astrologer profile ke
+// fields update kare (bio, experience, languages, specializations, photoUrl).
+// requestAstrologerUpgrade se alag — woh ek fresh application hai, yeh sirf
+// existing approved profile ka edit hai.
+export const UpdateAstrologerProfileSchema = z.object({
+  bio:             z.string().min(20, 'Bio kam se kam 20 characters ka ho').max(1000).optional(),
+  experience:      z.number().int().min(0).max(70).optional(),
+  languages:       z.array(z.string()).min(1).optional(),
+  specializations: z.array(z.string()).min(1).optional(),
+  photoUrl:        z.string().url().optional(),
+})
+export type UpdateAstrologerProfileDto = z.infer<typeof UpdateAstrologerProfileSchema>
 
 export type OnboardingDto    = z.infer<typeof OnboardingSchema>
 export type UpdateProfileDto = z.infer<typeof UpdateProfileSchema>

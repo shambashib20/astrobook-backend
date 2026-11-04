@@ -89,3 +89,38 @@ export const EarningsQuerySchema = z.object({
   limit: z.coerce.number().int().min(1).max(100).default(20),
 })
 export type EarningsQueryDto = z.infer<typeof EarningsQuerySchema>
+
+// ─── Logs ──────────────────────────────────────────────────────────────────
+
+export const ListLogsQuerySchema = z.object({
+  service: z.string().optional(), // e.g. 'db' | 'cron' — omit for all
+  level: z.enum(['debug', 'info', 'warn', 'error']).optional(),
+  limit: z.coerce.number().int().min(1).max(200).default(50),
+})
+export type ListLogsQueryDto = z.infer<typeof ListLogsQuerySchema>
+
+// ─── Payouts ────────────────────────────────────────────────────────────────
+
+export const ListPayoutsQuerySchema = PaginationQuerySchema.extend({
+  status: z.enum(['pending', 'paid', 'failed']).optional(),
+  astrologerId: z.string().uuid().optional(),
+})
+export type ListPayoutsQueryDto = z.infer<typeof ListPayoutsQuerySchema>
+
+export const CreatePayoutSchema = z.object({
+  astrologerId: z.string().uuid(),
+  amount: z.number().positive(),
+  payoutMethod: z.enum(['bank', 'upi']).optional(),
+  referenceId: z.string().max(255).optional(),
+  notes: z.string().max(1000).optional(),
+  periodFrom: z.string().optional(), // ISO date string
+  periodTo: z.string().optional(),   // ISO date string
+})
+export type CreatePayoutDto = z.infer<typeof CreatePayoutSchema>
+
+export const UpdatePayoutStatusSchema = z.object({
+  status: z.enum(['paid', 'failed']),
+  referenceId: z.string().max(255).optional(),
+  notes: z.string().max(1000).optional(),
+})
+export type UpdatePayoutStatusDto = z.infer<typeof UpdatePayoutStatusSchema>

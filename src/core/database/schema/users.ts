@@ -10,6 +10,7 @@ import {
   pgTable,
   smallint,
   text,
+  time,
   timestamp,
   uuid,
   varchar,
@@ -34,6 +35,11 @@ export const users = pgTable(
   email:        varchar('email', { length: 255 }).unique(),      // optional
   name:         varchar('name', { length: 255 }),                // onboarding mein aayega
   dateOfBirth:  date('date_of_birth'),
+  // ── Birth details for Kundli generation ──────────────────────────────────
+  birthTime:    time('birth_time'),                              // HH:MM:SS — birth time
+  birthPlace:   varchar('birth_place', { length: 255 }),        // e.g. "Kolkata, West Bengal"
+  birthLat:     numeric('birth_lat', { precision: 9, scale: 6 }), // geocoded latitude
+  birthLng:     numeric('birth_lng', { precision: 9, scale: 6 }), // geocoded longitude
   role:         userRoleEnum('role').notNull().default('user'),
   interests:    text('interests').array(),
   isOnboarded:  boolean('is_onboarded').notNull().default(false),

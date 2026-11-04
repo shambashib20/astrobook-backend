@@ -1,5 +1,5 @@
 {
-  "id": "00e36068-dbff-4bd1-8d24-65035137e8f8",
+  "id": "f5c31f46-bbca-45de-b53c-ec821fe77169",
   "prevId": "00000000-0000-0000-0000-000000000000",
   "version": "7",
   "dialect": "postgresql",
@@ -143,27 +143,87 @@
           "primaryKey": false,
           "notNull": false
         },
-        "cashfree_vendor_id": {
-          "name": "cashfree_vendor_id",
-          "type": "varchar(64)",
+        "payout_method": {
+          "name": "payout_method",
+          "type": "varchar(8)",
           "primaryKey": false,
           "notNull": false
         },
-        "cashfree_vendor_status": {
-          "name": "cashfree_vendor_status",
-          "type": "varchar(32)",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "cashfree_vendor_response": {
-          "name": "cashfree_vendor_response",
+        "payout_details": {
+          "name": "payout_details",
           "type": "jsonb",
           "primaryKey": false,
           "notNull": false
         },
-        "cashfree_vendor_created_at": {
-          "name": "cashfree_vendor_created_at",
+        "payout_details_updated_at": {
+          "name": "payout_details_updated_at",
           "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "razorpay_account_id": {
+          "name": "razorpay_account_id",
+          "type": "varchar(64)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "razorpay_account_status": {
+          "name": "razorpay_account_status",
+          "type": "varchar(32)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "razorpay_reference_id": {
+          "name": "razorpay_reference_id",
+          "type": "varchar(128)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "razorpay_account_response": {
+          "name": "razorpay_account_response",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "razorpay_account_created_at": {
+          "name": "razorpay_account_created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "razorpay_product_id": {
+          "name": "razorpay_product_id",
+          "type": "varchar(64)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "razorpay_product_status": {
+          "name": "razorpay_product_status",
+          "type": "varchar(32)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "razorpay_product_response": {
+          "name": "razorpay_product_response",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "razorpay_stakeholder_id": {
+          "name": "razorpay_stakeholder_id",
+          "type": "varchar(64)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "razorpay_stakeholder_response": {
+          "name": "razorpay_stakeholder_response",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "razorpay_documents_response": {
+          "name": "razorpay_documents_response",
+          "type": "jsonb",
           "primaryKey": false,
           "notNull": false
         },
@@ -226,11 +286,18 @@
             "user_id"
           ]
         },
-        "astrologer_profiles_cashfree_vendor_id_unique": {
-          "name": "astrologer_profiles_cashfree_vendor_id_unique",
+        "astrologer_profiles_razorpay_account_id_unique": {
+          "name": "astrologer_profiles_razorpay_account_id_unique",
           "nullsNotDistinct": false,
           "columns": [
-            "cashfree_vendor_id"
+            "razorpay_account_id"
+          ]
+        },
+        "astrologer_profiles_razorpay_product_id_unique": {
+          "name": "astrologer_profiles_razorpay_product_id_unique",
+          "nullsNotDistinct": false,
+          "columns": [
+            "razorpay_product_id"
           ]
         }
       }
@@ -703,6 +770,20 @@
           "notNull": true,
           "default": "'pending'"
         },
+        "cancelled_by": {
+          "name": "cancelled_by",
+          "type": "cancelled_by",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "rescheduled_count": {
+          "name": "rescheduled_count",
+          "type": "smallint",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
+        },
         "notes": {
           "name": "notes",
           "type": "text",
@@ -968,6 +1049,181 @@
         }
       }
     },
+    "public.cancellation_requests": {
+      "name": "cancellation_requests",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "appointment_id": {
+          "name": "appointment_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "user_id": {
+          "name": "user_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "amount": {
+          "name": "amount",
+          "type": "numeric(10, 2)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "razorpay_payment_id": {
+          "name": "razorpay_payment_id",
+          "type": "varchar(255)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "razorpay_order_id": {
+          "name": "razorpay_order_id",
+          "type": "varchar(255)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "deduction_amount": {
+          "name": "deduction_amount",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
+        },
+        "upi_id": {
+          "name": "upi_id",
+          "type": "varchar(255)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "status": {
+          "name": "status",
+          "type": "cancellation_request_status",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'pending'"
+        },
+        "initiated_by": {
+          "name": "initiated_by",
+          "type": "cancellation_initiated_by",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'astrologer'"
+        },
+        "expires_at": {
+          "name": "expires_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "cancellation_requests_appointment_id_idx": {
+          "name": "cancellation_requests_appointment_id_idx",
+          "columns": [
+            {
+              "expression": "appointment_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "cancellation_requests_user_id_idx": {
+          "name": "cancellation_requests_user_id_idx",
+          "columns": [
+            {
+              "expression": "user_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "cancellation_requests_status_expires_at_idx": {
+          "name": "cancellation_requests_status_expires_at_idx",
+          "columns": [
+            {
+              "expression": "status",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "expires_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "cancellation_requests_appointment_id_appointments_id_fk": {
+          "name": "cancellation_requests_appointment_id_appointments_id_fk",
+          "tableFrom": "cancellation_requests",
+          "tableTo": "appointments",
+          "columnsFrom": [
+            "appointment_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "cancellation_requests_user_id_users_id_fk": {
+          "name": "cancellation_requests_user_id_users_id_fk",
+          "tableFrom": "cancellation_requests",
+          "tableTo": "users",
+          "columnsFrom": [
+            "user_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {}
+    },
     "public.consultation_service_variants": {
       "name": "consultation_service_variants",
       "schema": "",
@@ -1192,6 +1448,242 @@
       "compositePrimaryKeys": {},
       "uniqueConstraints": {}
     },
+    "public.payment_transactions": {
+      "name": "payment_transactions",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "payment_id": {
+          "name": "payment_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "appointment_id": {
+          "name": "appointment_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "user_id": {
+          "name": "user_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "astrologer_id": {
+          "name": "astrologer_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "razorpay_order_id": {
+          "name": "razorpay_order_id",
+          "type": "varchar(255)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "razorpay_payment_id": {
+          "name": "razorpay_payment_id",
+          "type": "varchar(255)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "event": {
+          "name": "event",
+          "type": "payment_transaction_event",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "amount": {
+          "name": "amount",
+          "type": "numeric(10, 2)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "currency": {
+          "name": "currency",
+          "type": "varchar(8)",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'INR'"
+        },
+        "method": {
+          "name": "method",
+          "type": "varchar(32)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "failure_code": {
+          "name": "failure_code",
+          "type": "varchar(64)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "failure_reason": {
+          "name": "failure_reason",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "razorpay_fee": {
+          "name": "razorpay_fee",
+          "type": "numeric(10, 2)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "razorpay_tax": {
+          "name": "razorpay_tax",
+          "type": "numeric(10, 2)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "captured_at": {
+          "name": "captured_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "raw_payload": {
+          "name": "raw_payload",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "payment_transactions_order_id_idx": {
+          "name": "payment_transactions_order_id_idx",
+          "columns": [
+            {
+              "expression": "razorpay_order_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "payment_transactions_user_id_idx": {
+          "name": "payment_transactions_user_id_idx",
+          "columns": [
+            {
+              "expression": "user_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "payment_transactions_astrologer_id_idx": {
+          "name": "payment_transactions_astrologer_id_idx",
+          "columns": [
+            {
+              "expression": "astrologer_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "payment_transactions_appointment_id_idx": {
+          "name": "payment_transactions_appointment_id_idx",
+          "columns": [
+            {
+              "expression": "appointment_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "payment_transactions_payment_id_payments_id_fk": {
+          "name": "payment_transactions_payment_id_payments_id_fk",
+          "tableFrom": "payment_transactions",
+          "tableTo": "payments",
+          "columnsFrom": [
+            "payment_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "set null",
+          "onUpdate": "no action"
+        },
+        "payment_transactions_appointment_id_appointments_id_fk": {
+          "name": "payment_transactions_appointment_id_appointments_id_fk",
+          "tableFrom": "payment_transactions",
+          "tableTo": "appointments",
+          "columnsFrom": [
+            "appointment_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "set null",
+          "onUpdate": "no action"
+        },
+        "payment_transactions_user_id_users_id_fk": {
+          "name": "payment_transactions_user_id_users_id_fk",
+          "tableFrom": "payment_transactions",
+          "tableTo": "users",
+          "columnsFrom": [
+            "user_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "set null",
+          "onUpdate": "no action"
+        },
+        "payment_transactions_astrologer_id_users_id_fk": {
+          "name": "payment_transactions_astrologer_id_users_id_fk",
+          "tableFrom": "payment_transactions",
+          "tableTo": "users",
+          "columnsFrom": [
+            "astrologer_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "set null",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {}
+    },
     "public.payments": {
       "name": "payments",
       "schema": "",
@@ -1209,51 +1701,33 @@
           "primaryKey": false,
           "notNull": true
         },
-        "cashfree_order_id": {
-          "name": "cashfree_order_id",
+        "user_id": {
+          "name": "user_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "astrologer_id": {
+          "name": "astrologer_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "razorpay_order_id": {
+          "name": "razorpay_order_id",
           "type": "varchar(255)",
           "primaryKey": false,
           "notNull": false
         },
-        "cashfree_payment_id": {
-          "name": "cashfree_payment_id",
+        "razorpay_payment_id": {
+          "name": "razorpay_payment_id",
           "type": "varchar(255)",
           "primaryKey": false,
           "notNull": false
         },
-        "platform_commission_percentage": {
-          "name": "platform_commission_percentage",
-          "type": "numeric(5, 2)",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "astrologer_payout_amount": {
-          "name": "astrologer_payout_amount",
-          "type": "numeric(10, 2)",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "refund_status": {
-          "name": "refund_status",
-          "type": "varchar(16)",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "refunded_amount": {
-          "name": "refunded_amount",
-          "type": "numeric(10, 2)",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "refunded_at": {
-          "name": "refunded_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "cashfree_refund_id": {
-          "name": "cashfree_refund_id",
-          "type": "varchar(255)",
+        "razorpay_signature": {
+          "name": "razorpay_signature",
+          "type": "varchar(512)",
           "primaryKey": false,
           "notNull": false
         },
@@ -1262,6 +1736,37 @@
           "type": "numeric(10, 2)",
           "primaryKey": false,
           "notNull": true
+        },
+        "currency": {
+          "name": "currency",
+          "type": "varchar(8)",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'INR'"
+        },
+        "method": {
+          "name": "method",
+          "type": "varchar(32)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "captured_at": {
+          "name": "captured_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "failure_code": {
+          "name": "failure_code",
+          "type": "varchar(64)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "failure_reason": {
+          "name": "failure_reason",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
         },
         "status": {
           "name": "status",
@@ -1302,11 +1807,26 @@
           "method": "btree",
           "with": {}
         },
-        "payments_cashfree_order_id_idx": {
-          "name": "payments_cashfree_order_id_idx",
+        "payments_user_id_idx": {
+          "name": "payments_user_id_idx",
           "columns": [
             {
-              "expression": "cashfree_order_id",
+              "expression": "user_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "payments_astrologer_id_idx": {
+          "name": "payments_astrologer_id_idx",
+          "columns": [
+            {
+              "expression": "astrologer_id",
               "isExpression": false,
               "asc": true,
               "nulls": "last"
@@ -1331,10 +1851,130 @@
           ],
           "onDelete": "cascade",
           "onUpdate": "no action"
+        },
+        "payments_user_id_users_id_fk": {
+          "name": "payments_user_id_users_id_fk",
+          "tableFrom": "payments",
+          "tableTo": "users",
+          "columnsFrom": [
+            "user_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "set null",
+          "onUpdate": "no action"
+        },
+        "payments_astrologer_id_users_id_fk": {
+          "name": "payments_astrologer_id_users_id_fk",
+          "tableFrom": "payments",
+          "tableTo": "users",
+          "columnsFrom": [
+            "astrologer_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "set null",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
       "uniqueConstraints": {}
+    },
+    "public.recurring_availability": {
+      "name": "recurring_availability",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "astrologer_id": {
+          "name": "astrologer_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "day_of_week": {
+          "name": "day_of_week",
+          "type": "smallint",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "start_time": {
+          "name": "start_time",
+          "type": "time",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "end_time": {
+          "name": "end_time",
+          "type": "time",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "timezone": {
+          "name": "timezone",
+          "type": "varchar(64)",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'Asia/Kolkata'"
+        },
+        "is_active": {
+          "name": "is_active",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": true
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "recurring_availability_astrologer_id_users_id_fk": {
+          "name": "recurring_availability_astrologer_id_users_id_fk",
+          "tableFrom": "recurring_availability",
+          "tableTo": "users",
+          "columnsFrom": [
+            "astrologer_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "recurring_availability_astrologer_id_day_of_week_start_time_end_time_unique": {
+          "name": "recurring_availability_astrologer_id_day_of_week_start_time_end_time_unique",
+          "nullsNotDistinct": false,
+          "columns": [
+            "astrologer_id",
+            "day_of_week",
+            "start_time",
+            "end_time"
+          ]
+        }
+      }
     },
     "public.service_requests": {
       "name": "service_requests",
@@ -1548,8 +2188,8 @@
       "compositePrimaryKeys": {},
       "uniqueConstraints": {}
     },
-    "public.vendor_settlements": {
-      "name": "vendor_settlements",
+    "public.slot_locks": {
+      "name": "slot_locks",
       "schema": "",
       "columns": {
         "id": {
@@ -1565,33 +2205,119 @@
           "primaryKey": false,
           "notNull": true
         },
-        "cashfree_vendor_id": {
-          "name": "cashfree_vendor_id",
-          "type": "varchar(64)",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "period_start": {
-          "name": "period_start",
+        "slot_start": {
+          "name": "slot_start",
           "type": "timestamp with time zone",
           "primaryKey": false,
           "notNull": true
         },
-        "period_end": {
-          "name": "period_end",
+        "locked_by": {
+          "name": "locked_by",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "expires_at": {
+          "name": "expires_at",
           "type": "timestamp with time zone",
           "primaryKey": false,
           "notNull": true
         },
-        "status": {
-          "name": "status",
-          "type": "varchar(16)",
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "slot_locks_astrologer_id_users_id_fk": {
+          "name": "slot_locks_astrologer_id_users_id_fk",
+          "tableFrom": "slot_locks",
+          "tableTo": "users",
+          "columnsFrom": [
+            "astrologer_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "slot_locks_locked_by_users_id_fk": {
+          "name": "slot_locks_locked_by_users_id_fk",
+          "tableFrom": "slot_locks",
+          "tableTo": "users",
+          "columnsFrom": [
+            "locked_by"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "slot_locks_astrologer_id_slot_start_unique": {
+          "name": "slot_locks_astrologer_id_slot_start_unique",
+          "nullsNotDistinct": false,
+          "columns": [
+            "astrologer_id",
+            "slot_start"
+          ]
+        }
+      }
+    },
+    "public.wallet_credits": {
+      "name": "wallet_credits",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "user_id": {
+          "name": "user_id",
+          "type": "uuid",
           "primaryKey": false,
           "notNull": true
         },
-        "cashfree_response": {
-          "name": "cashfree_response",
-          "type": "jsonb",
+        "amount": {
+          "name": "amount",
+          "type": "numeric(10, 2)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "type": {
+          "name": "type",
+          "type": "wallet_credit_type",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "source": {
+          "name": "source",
+          "type": "wallet_credit_source",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "cancellation_request_id": {
+          "name": "cancellation_request_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "description": {
+          "name": "description",
+          "type": "text",
           "primaryKey": false,
           "notNull": false
         },
@@ -1604,11 +2330,26 @@
         }
       },
       "indexes": {
-        "vendor_settlements_astrologer_id_idx": {
-          "name": "vendor_settlements_astrologer_id_idx",
+        "wallet_credits_user_id_idx": {
+          "name": "wallet_credits_user_id_idx",
           "columns": [
             {
-              "expression": "astrologer_id",
+              "expression": "user_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "wallet_credits_cancellation_request_id_idx": {
+          "name": "wallet_credits_cancellation_request_id_idx",
+          "columns": [
+            {
+              "expression": "cancellation_request_id",
               "isExpression": false,
               "asc": true,
               "nulls": "last"
@@ -1621,17 +2362,30 @@
         }
       },
       "foreignKeys": {
-        "vendor_settlements_astrologer_id_users_id_fk": {
-          "name": "vendor_settlements_astrologer_id_users_id_fk",
-          "tableFrom": "vendor_settlements",
+        "wallet_credits_user_id_users_id_fk": {
+          "name": "wallet_credits_user_id_users_id_fk",
+          "tableFrom": "wallet_credits",
           "tableTo": "users",
           "columnsFrom": [
-            "astrologer_id"
+            "user_id"
           ],
           "columnsTo": [
             "id"
           ],
           "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "wallet_credits_cancellation_request_id_cancellation_requests_id_fk": {
+          "name": "wallet_credits_cancellation_request_id_cancellation_requests_id_fk",
+          "tableFrom": "wallet_credits",
+          "tableTo": "cancellation_requests",
+          "columnsFrom": [
+            "cancellation_request_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "set null",
           "onUpdate": "no action"
         }
       },
@@ -1766,7 +2520,16 @@
         }
       },
       "compositePrimaryKeys": {},
-      "uniqueConstraints": {}
+      "uniqueConstraints": {
+        "cart_items_user_service_unique": {
+          "name": "cart_items_user_service_unique",
+          "nullsNotDistinct": false,
+          "columns": [
+            "user_id",
+            "service_id"
+          ]
+        }
+      }
     },
     "public.push_tokens": {
       "name": "push_tokens",
@@ -2074,6 +2837,36 @@
           "primaryKey": false,
           "notNull": false
         },
+        "sticker_text": {
+          "name": "sticker_text",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "sticker_x": {
+          "name": "sticker_x",
+          "type": "numeric(5, 4)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "sticker_y": {
+          "name": "sticker_y",
+          "type": "numeric(5, 4)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "sticker_text_color": {
+          "name": "sticker_text_color",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "sticker_bg_color": {
+          "name": "sticker_bg_color",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
         "linked_service_id": {
           "name": "linked_service_id",
           "type": "uuid",
@@ -2378,6 +3171,434 @@
       },
       "compositePrimaryKeys": {},
       "uniqueConstraints": {}
+    },
+    "public.favorites": {
+      "name": "favorites",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "user_id": {
+          "name": "user_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "item_type": {
+          "name": "item_type",
+          "type": "varchar(32)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "item_id": {
+          "name": "item_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "favorites_user_created_at_idx": {
+          "name": "favorites_user_created_at_idx",
+          "columns": [
+            {
+              "expression": "user_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "created_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "favorites_user_id_users_id_fk": {
+          "name": "favorites_user_id_users_id_fk",
+          "tableFrom": "favorites",
+          "tableTo": "users",
+          "columnsFrom": [
+            "user_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "favorites_user_item_unique": {
+          "name": "favorites_user_item_unique",
+          "nullsNotDistinct": false,
+          "columns": [
+            "user_id",
+            "item_type",
+            "item_id"
+          ]
+        }
+      }
+    },
+    "public.reviews": {
+      "name": "reviews",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "appointment_id": {
+          "name": "appointment_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "user_id": {
+          "name": "user_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "astrologer_id": {
+          "name": "astrologer_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "rating": {
+          "name": "rating",
+          "type": "smallint",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "comment": {
+          "name": "comment",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "reviews_astrologer_created_at_idx": {
+          "name": "reviews_astrologer_created_at_idx",
+          "columns": [
+            {
+              "expression": "astrologer_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "created_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "reviews_user_id_idx": {
+          "name": "reviews_user_id_idx",
+          "columns": [
+            {
+              "expression": "user_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "reviews_appointment_id_appointments_id_fk": {
+          "name": "reviews_appointment_id_appointments_id_fk",
+          "tableFrom": "reviews",
+          "tableTo": "appointments",
+          "columnsFrom": [
+            "appointment_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "reviews_user_id_users_id_fk": {
+          "name": "reviews_user_id_users_id_fk",
+          "tableFrom": "reviews",
+          "tableTo": "users",
+          "columnsFrom": [
+            "user_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "reviews_astrologer_id_users_id_fk": {
+          "name": "reviews_astrologer_id_users_id_fk",
+          "tableFrom": "reviews",
+          "tableTo": "users",
+          "columnsFrom": [
+            "astrologer_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "reviews_appointment_id_unique": {
+          "name": "reviews_appointment_id_unique",
+          "nullsNotDistinct": false,
+          "columns": [
+            "appointment_id"
+          ]
+        }
+      }
+    },
+    "public.category_media": {
+      "name": "category_media",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "hero_video_url": {
+          "name": "hero_video_url",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "hero_image_url": {
+          "name": "hero_image_url",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {}
+    },
+    "public.payout_records": {
+      "name": "payout_records",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "astrologer_id": {
+          "name": "astrologer_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "amount": {
+          "name": "amount",
+          "type": "numeric(12, 2)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "status": {
+          "name": "status",
+          "type": "varchar(10)",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'pending'"
+        },
+        "payout_method": {
+          "name": "payout_method",
+          "type": "varchar(8)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "reference_id": {
+          "name": "reference_id",
+          "type": "varchar(255)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "notes": {
+          "name": "notes",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "period_from": {
+          "name": "period_from",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "period_to": {
+          "name": "period_to",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_by": {
+          "name": "created_by",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "payout_records_astrologer_idx": {
+          "name": "payout_records_astrologer_idx",
+          "columns": [
+            {
+              "expression": "astrologer_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "payout_records_status_idx": {
+          "name": "payout_records_status_idx",
+          "columns": [
+            {
+              "expression": "status",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "payout_records_created_at_idx": {
+          "name": "payout_records_created_at_idx",
+          "columns": [
+            {
+              "expression": "created_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "payout_records_astrologer_id_users_id_fk": {
+          "name": "payout_records_astrologer_id_users_id_fk",
+          "tableFrom": "payout_records",
+          "tableTo": "users",
+          "columnsFrom": [
+            "astrologer_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "payout_records_created_by_users_id_fk": {
+          "name": "payout_records_created_by_users_id_fk",
+          "tableFrom": "payout_records",
+          "tableTo": "users",
+          "columnsFrom": [
+            "created_by"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "set null",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {}
     }
   },
   "enums": {
@@ -2407,7 +3628,8 @@
         "confirmed",
         "ongoing",
         "completed",
-        "cancelled"
+        "cancelled",
+        "missed"
       ]
     },
     "public.bundle_status": {
@@ -2419,13 +3641,56 @@
         "completed"
       ]
     },
+    "public.cancellation_initiated_by": {
+      "name": "cancellation_initiated_by",
+      "schema": "public",
+      "values": [
+        "astrologer",
+        "user"
+      ]
+    },
+    "public.cancellation_request_status": {
+      "name": "cancellation_request_status",
+      "schema": "public",
+      "values": [
+        "pending",
+        "refunded",
+        "credited",
+        "timing_changed",
+        "admin_pending_money",
+        "admin_pending_wallet",
+        "admin_approved",
+        "admin_rejected"
+      ]
+    },
+    "public.cancelled_by": {
+      "name": "cancelled_by",
+      "schema": "public",
+      "values": [
+        "user",
+        "astrologer"
+      ]
+    },
     "public.payment_status": {
       "name": "payment_status",
       "schema": "public",
       "values": [
         "pending",
         "success",
-        "failed"
+        "failed",
+        "refunded"
+      ]
+    },
+    "public.payment_transaction_event": {
+      "name": "payment_transaction_event",
+      "schema": "public",
+      "values": [
+        "order.created",
+        "payment.captured",
+        "payment.failed",
+        "payment.refunded",
+        "verify.success",
+        "verify.failed"
       ]
     },
     "public.service_request_status": {
@@ -2436,6 +3701,23 @@
         "accepted",
         "rejected",
         "expired"
+      ]
+    },
+    "public.wallet_credit_source": {
+      "name": "wallet_credit_source",
+      "schema": "public",
+      "values": [
+        "cancellation_refund",
+        "manual",
+        "booking_payment"
+      ]
+    },
+    "public.wallet_credit_type": {
+      "name": "wallet_credit_type",
+      "schema": "public",
+      "values": [
+        "credit",
+        "debit"
       ]
     },
     "public.media_type": {

@@ -24,13 +24,17 @@ import ImageKit from 'imagekit'
 import type { AdminRepository } from '../repositories/admin.repository'
 import type {
   BanUserDto,
+  CreatePayoutDto,
   EarningsQueryDto,
   ListAppointmentsQueryDto,
   ListAstrologersQueryDto,
+  ListLogsQueryDto,
+  ListPayoutsQueryDto,
   ListPostsQueryDto,
   ListUsersQueryDto,
   UpdateCommissionDto,
   UpdateDocumentsDto,
+  UpdatePayoutStatusDto,
   UpdateUserRoleDto,
   UpdateVerificationDto,
 } from '../schemas/admin.schema'
@@ -361,5 +365,71 @@ export class AdminService {
     if (!exists) throw NotFoundError('Post not found')
 
     await this.adminRepository.deletePost(postId)
+  }
+
+  // ── Logs ──────────────────────────────────────────────────────────────────
+  // In-memory ring buffer (log-buffer utility) se recent logs — no DB query.
+  // service param se filter karo; omit karo to get all known services.
+
+  getLogs(query: ListLogsQueryDto) {
+    const KNOWN_SERVICES = ['db', 'cron', 'app']
+    const services = query.service ? [query.service] : KNOWN_SERVICES
+
+    const allLogs = services
+      .flatMap((service) =>
+        getRecentLogs(service, query.limit).map((entry) => ({ service, ...entry })),
+      )
+      .filter((entry) => !query.level || entry.level === query.level)
+      .sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime())
+      .slice(0, query.limit)
+
+    return { logs: allLogs, total: allLogs.length }
+  }
+
+  // ── Payouts ────────────────────────────────────────────────────────────────
+
+  async listPayouts(query: ListPayoutsQueryDto) {
+    const { rows, total } = await this.adminRepository.listPayoutRecords({
+      page: query.page,
+      limit: query.limit,
+      status: query.status,
+      astrologerId: query.astrologerId,
+    })
+    return { payouts: rows, meta: paginationMeta(total, query.page, query.limit) }
+  }
+
+  async createPayout(adminId: string, dto: CreatePayoutDto) {
+    const astrologer = await this.adminRepository.findAstrologerById(dto.astrologerId)
+    if (!astrologer) throw NotFoundError('Astrologer not found')
+
+    const record = await this.adminRepository.createPayoutRecord({
+      astrologerId: dto.astrologerId,
+      amount: dto.amount,
+      payoutMethod: dto.payoutMethod,
+      referenceId: dto.referenceId,
+      notes: dto.notes,
+      periodFrom: dto.periodFrom ? new Date(dto.periodFrom) : undefined,
+      periodTo: dto.periodTo ? new Date(dto.periodTo) : undefined,
+      createdBy: adminId,
+    })
+    return record
+  }
+
+  async updatePayoutStatus(id: string, dto: UpdatePayoutStatusDto) {
+    const payout = await this.adminRepository.findPayoutById(id)
+    if (!payout) throw NotFoundError('Payout record not found')
+    if (payout.status !== 'pending') {
+      throw BadRequestError(`Payout is already ${payout.status} — cannot update`)
+    }
+
+    await this.adminRepository.updatePayoutStatus(id, dto.status, dto.referenceId, dto.notes)
+    return { id, status: dto.status }
+  }
+
+  async getAstrologerPayoutSummary(astrologerId: string) {
+    const astrologer = await this.adminRepository.findAstrologerById(astrologerId)
+    if (!astrologer) throw NotFoundError('Astrologer not found')
+
+    return this.adminRepository.getAstrologerPayoutSummary(astrologerId)
   }
 }

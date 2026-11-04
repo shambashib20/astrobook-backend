@@ -39,7 +39,7 @@ const envSchema = z.object({
   // credits/DND issue), yeh true karne se /auth/send-otp response mein hi
   // OTP wapas aa jaata hai taaki QA manually enter kar sake. PRODUCTION mein
   // yeh kabhi true na ho — default false hai.
-  SHOW_OTP_IN_RESPONSE: z.coerce.boolean().default(false),
+  SHOW_OTP_IN_RESPONSE: z.string().transform(v => v === 'true').default('false'),
 
   // Google Play review test account — Play Console "App access" mein reviewer
   // ko yeh phone + OTP diya jaata hai (reviewer ko real WhatsApp OTP nahi

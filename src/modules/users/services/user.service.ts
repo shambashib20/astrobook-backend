@@ -7,6 +7,7 @@ import type {
   OnboardingDto,
   RequestAstrologerUpgradeDto,
   SavePayoutDetailsDto,
+  UpdateAstrologerProfileDto,
   UpdateProfileDto,
 } from '../schemas/user.schema'
 
@@ -98,6 +99,14 @@ export class UserService {
       verificationStatus: application?.verificationStatus ?? null,
       rejectionReason: application?.rejectionReason ?? null,
     }
+  }
+
+  // PATCH /users/me/astrologer-profile — approved astrologer apna profile update kare
+  async updateAstrologerProfile(userId: string, dto: UpdateAstrologerProfileDto) {
+    const profile = await this.userRepository.findAstrologerApplication(userId)
+    if (!profile) throw NotFoundError('Astrologer profile nahi mila — pehle approved hona zaroori hai')
+    const updated = await this.userRepository.updateAstrologerProfile(userId, dto)
+    return updated
   }
 
   async requestAstrologerUpgrade(userId: string, dto: RequestAstrologerUpgradeDto) {

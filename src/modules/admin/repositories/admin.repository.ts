@@ -391,6 +391,13 @@ export class AdminRepository {
   // ── Earnings: per-astrologer revenue breakdown ────────────────────────────
   // "completed" appointments ka price sum, grouped by astrologer.
   // commissionPercentage user.meta JSONB se nikalta hai.
+  //
+  // BUG FIX: Previously used Drizzle ORM helpers (eq/gte/lte) to build WHERE
+  // conditions, which generate `"appointments"."column"` qualified names.
+  // But when the FROM clause uses `FROM ${appointments} a` (aliased as 'a'),
+  // PostgreSQL hides the original table name — so `"appointments"."status"`
+  // causes: ERROR 42P01 invalid reference to FROM-clause entry for table
+  // "appointments". Fix: all conditions in aliased raw SQL must use the alias.
   async getEarningsSummary(opts: {
     page: number
     limit: number
@@ -401,13 +408,14 @@ export class AdminRepository {
     const { page, limit, astrologerId, dateFrom, dateTo } = opts
     const offset = (page - 1) * limit
 
-    // Sub-conditions on appointments
-    const appointmentConditions: any[] = [eq(appointments.status, 'completed')]
-    if (astrologerId) appointmentConditions.push(eq(appointments.astrologerId, astrologerId))
-    if (dateFrom) appointmentConditions.push(gte(appointments.scheduledAt, new Date(`${dateFrom}T00:00:00.000Z`)))
-    if (dateTo) appointmentConditions.push(lte(appointments.scheduledAt, new Date(`${dateTo}T23:59:59.999Z`)))
-
-    const where = and(...appointmentConditions)
+    // Build WHERE fragments using raw SQL with alias 'a'
+    const extraConditions: ReturnType<typeof sql>[] = []
+    if (astrologerId) extraConditions.push(sql`AND a.astrologer_id = ${astrologerId}`)
+    if (dateFrom) extraConditions.push(sql`AND a.scheduled_at >= ${new Date(`${dateFrom}T00:00:00.000Z`)}`)
+    if (dateTo) extraConditions.push(sql`AND a.scheduled_at <= ${new Date(`${dateTo}T23:59:59.999Z`)}`)
+    const extraWhere = extraConditions.length > 0
+      ? sql.join(extraConditions, sql` `)
+      : sql``
 
     // Raw SQL for aggregation with JSONB commission extraction
     const rows = await this.db.execute<{
@@ -435,7 +443,8 @@ export class AdminRepository {
                                                                            AS astrologer_payout
       FROM ${appointments} a
       JOIN ${users} u ON u.id = a.astrologer_id
-      WHERE ${where}
+      WHERE a.status = 'completed'
+      ${extraWhere}
       GROUP BY u.id, u.name, u.avatar_url, u.meta
       ORDER BY COALESCE(SUM(CAST(a.price AS numeric)), 0) DESC
       LIMIT ${limit} OFFSET ${offset}
@@ -444,7 +453,8 @@ export class AdminRepository {
     const totalResult = await this.db.execute<{ cnt: number }>(sql`
       SELECT COUNT(DISTINCT a.astrologer_id)::int AS cnt
       FROM ${appointments} a
-      WHERE ${where}
+      WHERE a.status = 'completed'
+      ${extraWhere}
     `)
 
     return { rows: rows.rows, total: totalResult.rows[0]?.cnt ?? 0 }
@@ -452,10 +462,13 @@ export class AdminRepository {
 
   // Overall platform revenue summary (totals)
   async getRevenueTotals(opts: { dateFrom?: string; dateTo?: string }) {
-    const conditions: any[] = [eq(appointments.status, 'completed')]
-    if (opts.dateFrom) conditions.push(gte(appointments.scheduledAt, new Date(`${opts.dateFrom}T00:00:00.000Z`)))
-    if (opts.dateTo) conditions.push(lte(appointments.scheduledAt, new Date(`${opts.dateTo}T23:59:59.999Z`)))
-    const where = and(...conditions)
+    // Same alias fix as getEarningsSummary — raw SQL only inside aliased query
+    const extraConditions: ReturnType<typeof sql>[] = []
+    if (opts.dateFrom) extraConditions.push(sql`AND a.scheduled_at >= ${new Date(`${opts.dateFrom}T00:00:00.000Z`)}`)
+    if (opts.dateTo) extraConditions.push(sql`AND a.scheduled_at <= ${new Date(`${opts.dateTo}T23:59:59.999Z`)}`)
+    const extraWhere = extraConditions.length > 0
+      ? sql.join(extraConditions, sql` `)
+      : sql``
 
     const revenueResult = await this.db.execute<{
       total_sessions: number
@@ -471,7 +484,8 @@ export class AdminRepository {
         ), 0)::text                                                              AS platform_revenue
       FROM ${appointments} a
       JOIN ${users} u ON u.id = a.astrologer_id
-      WHERE ${where}
+      WHERE a.status = 'completed'
+      ${extraWhere}
     `)
 
     const row = revenueResult.rows[0]
@@ -479,6 +493,138 @@ export class AdminRepository {
       totalSessions: row?.total_sessions ?? 0,
       grossRevenue: row?.gross_revenue ?? '0',
       platformRevenue: row?.platform_revenue ?? '0',
+    }
+  }
+
+  // ── Payouts ──────────────────────────────────────────────────────────────
+
+  async listPayoutRecords(opts: {
+    page: number
+    limit: number
+    status?: string
+    astrologerId?: string
+  }) {
+    const { page, limit } = opts
+    const offset = (page - 1) * limit
+
+    const conditions: ReturnType<typeof sql>[] = []
+    if (opts.status) conditions.push(sql`pr.status = ${opts.status}`)
+    if (opts.astrologerId) conditions.push(sql`pr.astrologer_id = ${opts.astrologerId}`)
+    const whereClause = conditions.length > 0
+      ? sql`WHERE ${sql.join(conditions, sql` AND `)}`
+      : sql``
+
+    const rows = await this.db.execute<{
+      id: string
+      astrologer_id: string
+      astrologer_name: string | null
+      avatar_url: string | null
+      amount: string
+      status: string
+      payout_method: string | null
+      reference_id: string | null
+      notes: string | null
+      period_from: string | null
+      period_to: string | null
+      created_at: string
+      updated_at: string
+    }>(sql`
+      SELECT
+        pr.id, pr.astrologer_id,
+        u.name AS astrologer_name, u.avatar_url,
+        pr.amount::text, pr.status, pr.payout_method,
+        pr.reference_id, pr.notes,
+        pr.period_from, pr.period_to,
+        pr.created_at, pr.updated_at
+      FROM payout_records pr
+      JOIN ${users} u ON u.id = pr.astrologer_id
+      ${whereClause}
+      ORDER BY pr.created_at DESC
+      LIMIT ${limit} OFFSET ${offset}
+    `)
+
+    const totalResult = await this.db.execute<{ cnt: number }>(sql`
+      SELECT COUNT(*)::int AS cnt
+      FROM payout_records pr
+      ${whereClause}
+    `)
+
+    return { rows: rows.rows, total: totalResult.rows[0]?.cnt ?? 0 }
+  }
+
+  async createPayoutRecord(data: {
+    astrologerId: string
+    amount: number
+    payoutMethod?: string
+    referenceId?: string
+    notes?: string
+    periodFrom?: Date
+    periodTo?: Date
+    createdBy: string
+  }) {
+    const result = await this.db.execute<{ id: string }>(sql`
+      INSERT INTO payout_records
+        (astrologer_id, amount, status, payout_method, reference_id, notes,
+         period_from, period_to, created_by)
+      VALUES
+        (${data.astrologerId}, ${data.amount}, 'pending',
+         ${data.payoutMethod ?? null}, ${data.referenceId ?? null},
+         ${data.notes ?? null}, ${data.periodFrom ?? null}, ${data.periodTo ?? null},
+         ${data.createdBy})
+      RETURNING id
+    `)
+    return result.rows[0]
+  }
+
+  async updatePayoutStatus(id: string, status: string, referenceId?: string, notes?: string) {
+    await this.db.execute(sql`
+      UPDATE payout_records
+      SET status = ${status},
+          reference_id = COALESCE(${referenceId ?? null}, reference_id),
+          notes = COALESCE(${notes ?? null}, notes),
+          updated_at = now()
+      WHERE id = ${id}
+    `)
+  }
+
+  async findPayoutById(id: string) {
+    const result = await this.db.execute<{ id: string; astrologer_id: string; status: string }>(sql`
+      SELECT id, astrologer_id, status FROM payout_records WHERE id = ${id}
+    `)
+    return result.rows[0] ?? null
+  }
+
+  async getAstrologerPayoutSummary(astrologerId: string) {
+    const result = await this.db.execute<{
+      total_earnings: string
+      total_paid: string
+      pending_amount: string
+      session_count: number
+    }>(sql`
+      SELECT
+        COALESCE(SUM(CAST(a.price AS numeric))
+          * (1 - COALESCE((u.meta->>'commissionPercentage')::numeric, 30) / 100), 0)::text
+                                              AS total_earnings,
+        COALESCE((
+          SELECT SUM(amount) FROM payout_records
+          WHERE astrologer_id = ${astrologerId} AND status = 'paid'
+        ), 0)::text                           AS total_paid,
+        COALESCE((
+          SELECT SUM(amount) FROM payout_records
+          WHERE astrologer_id = ${astrologerId} AND status = 'pending'
+        ), 0)::text                           AS pending_amount,
+        COUNT(a.id)::int                      AS session_count
+      FROM ${appointments} a
+      JOIN ${users} u ON u.id = a.astrologer_id
+      WHERE a.astrologer_id = ${astrologerId}
+        AND a.status = 'completed'
+    `)
+    const row = result.rows[0]
+    return {
+      totalEarnings: row?.total_earnings ?? '0',
+      totalPaid: row?.total_paid ?? '0',
+      pendingAmount: row?.pending_amount ?? '0',
+      sessionCount: row?.session_count ?? 0,
     }
   }
 }

@@ -112,6 +112,10 @@ export async function userRoutes(app: FastifyInstance) {
               phone: { type: ['string', 'null'] },
               name: { type: 'string' },
               dateOfBirth: { type: ['string', 'null'] },
+              // Kundli birth details — IMPORTANT: Fastify's fast-json-stringify
+              // silently strips any property NOT declared here. Must be listed.
+              birthTime:  { type: ['string', 'null'] },
+              birthPlace: { type: ['string', 'null'] },
               role: { type: 'string' },
               interests: { type: ['array', 'null'], items: { type: 'string' } },
               isOnboarded: { type: 'boolean' },
@@ -150,12 +154,17 @@ export async function userRoutes(app: FastifyInstance) {
           properties: {
             name: { type: 'string', minLength: 2 },
             // Declared here on purpose: Fastify's AJV strips undeclared body
-            // props, so without this the email never reaches the controller.
-            email: { type: 'string', maxLength: 255 },
+            // props, so without this the fields never reach the controller.
+            email:       { type: 'string', maxLength: 255 },
             dateOfBirth: { type: 'string' },
-            interests: { type: 'array', items: { type: 'string' } },
-            avatarUrl: { type: 'string' },
-            bio: { type: 'string', maxLength: 500 },
+            interests:   { type: 'array', items: { type: 'string' } },
+            avatarUrl:   { type: 'string' },
+            bio:         { type: 'string', maxLength: 500 },
+            // Kundli birth details — ye declare karne se AJV strip nahi karega
+            birthTime:  { type: 'string' },
+            birthPlace: { type: 'string', maxLength: 255 },
+            birthLat:   { type: 'number' },
+            birthLng:   { type: 'number' },
           },
         },
         response: {
@@ -167,6 +176,9 @@ export async function userRoutes(app: FastifyInstance) {
               phone: { type: ['string', 'null'] },
               name: { type: 'string' },
               dateOfBirth: { type: ['string', 'null'] },
+              // Kundli birth details — response mein bhi include karo
+              birthTime:  { type: ['string', 'null'] },
+              birthPlace: { type: ['string', 'null'] },
               role: { type: 'string' },
               interests: { type: ['array', 'null'], items: { type: 'string' } },
               isOnboarded: { type: 'boolean' },
@@ -182,6 +194,30 @@ export async function userRoutes(app: FastifyInstance) {
       },
     },
     userController.updateProfile
+  )
+
+  // PATCH /users/me/astrologer-profile
+  app.patch(
+    `${prefix}/me/astrologer-profile`,
+    {
+      preHandler: [authenticate],
+      schema: {
+        tags: ['Users'],
+        summary: 'Update astrologer profile fields (bio, experience, languages, specializations, photoUrl)',
+        security: [{ bearerAuth: [] }],
+        body: {
+          type: 'object',
+          properties: {
+            bio:             { type: 'string', minLength: 20, maxLength: 1000 },
+            experience:      { type: 'integer', minimum: 0, maximum: 70 },
+            languages:       { type: 'array', items: { type: 'string' }, minItems: 1 },
+            specializations: { type: 'array', items: { type: 'string' }, minItems: 1 },
+            photoUrl:        { type: 'string' },
+          },
+        },
+      },
+    },
+    userController.updateAstrologerProfile,
   )
 
   // POST /users/request-astrologer-upgrade

@@ -528,4 +528,175 @@ export async function adminRoutes(app: FastifyInstance) {
     },
     adminController.listTransactionEvents,
   )
+
+  // ── Logs ──────────────────────────────────────────────────────────────────
+
+  app.get(
+    `${prefix}/logs`,
+    {
+      preHandler: guard,
+      schema: {
+        tags: ['Admin'],
+        summary: 'Recent in-memory application logs (db, cron, app services)',
+        security: [{ bearerAuth: [] }],
+        querystring: {
+          type: 'object',
+          properties: {
+            service: { type: 'string', description: 'Filter by service name: db | cron | app' },
+            level: { type: 'string', enum: ['info', 'warn', 'error'] },
+            limit: { type: 'integer', minimum: 1, maximum: 200 },
+          },
+        },
+        response: {
+          200: {
+            type: 'object',
+            properties: {
+              logs: { type: 'array', items: { type: 'object', additionalProperties: true } },
+              total: { type: 'integer' },
+            },
+          },
+        },
+      },
+    },
+    adminController.getLogs,
+  )
+
+  // ── Payouts ───────────────────────────────────────────────────────────────
+
+  // GET /admin/payouts/history — same as /payouts but frontend calls this URL
+  // NOTE: static route (/history) MUST be registered before parameterised (:id)
+  app.get(
+    `${prefix}/payouts/history`,
+    {
+      preHandler: guard,
+      schema: {
+        tags: ['Admin'],
+        summary: 'Payout history — alias for /admin/payouts (paginated)',
+        security: [{ bearerAuth: [] }],
+        querystring: {
+          type: 'object',
+          properties: {
+            page: { type: 'integer', minimum: 1 },
+            limit: { type: 'integer', minimum: 1, maximum: 100 },
+            status: { type: 'string', enum: ['pending', 'paid', 'failed'] },
+            astrologerId: { type: 'string', format: 'uuid' },
+          },
+        },
+      },
+    },
+    adminController.listPayouts,
+  )
+
+  app.get(
+    `${prefix}/payouts`,
+    {
+      preHandler: guard,
+      schema: {
+        tags: ['Admin'],
+        summary: 'List astrologer payout records (paginated)',
+        security: [{ bearerAuth: [] }],
+        querystring: {
+          type: 'object',
+          properties: {
+            page: { type: 'integer', minimum: 1 },
+            limit: { type: 'integer', minimum: 1, maximum: 100 },
+            status: { type: 'string', enum: ['pending', 'paid', 'failed'] },
+            astrologerId: { type: 'string', format: 'uuid' },
+          },
+        },
+        response: {
+          200: {
+            type: 'object',
+            properties: {
+              payouts: { type: 'array', items: { type: 'object', additionalProperties: true } },
+              meta: {
+                type: 'object',
+                properties: {
+                  total: { type: 'integer' },
+                  page: { type: 'integer' },
+                  limit: { type: 'integer' },
+                  totalPages: { type: 'integer' },
+                },
+              },
+            },
+          },
+        },
+      },
+    },
+    adminController.listPayouts,
+  )
+
+  app.post(
+    `${prefix}/payouts`,
+    {
+      preHandler: guard,
+      schema: {
+        tags: ['Admin'],
+        summary: 'Create a payout record for an astrologer',
+        security: [{ bearerAuth: [] }],
+        body: {
+          type: 'object',
+          required: ['astrologerId', 'amount'],
+          properties: {
+            astrologerId: { type: 'string', format: 'uuid' },
+            amount: { type: 'number', exclusiveMinimum: 0 },
+            payoutMethod: { type: 'string', enum: ['bank', 'upi'] },
+            referenceId: { type: 'string', maxLength: 255 },
+            notes: { type: 'string', maxLength: 1000 },
+            periodFrom: { type: 'string', description: 'ISO date string' },
+            periodTo: { type: 'string', description: 'ISO date string' },
+          },
+        },
+      },
+    },
+    adminController.createPayout,
+  )
+
+  app.patch(
+    `${prefix}/payouts/:id`,
+    {
+      preHandler: guard,
+      schema: {
+        tags: ['Admin'],
+        summary: 'Mark a payout as paid or failed',
+        security: [{ bearerAuth: [] }],
+        params: { type: 'object', properties: { id: { type: 'string', format: 'uuid' } } },
+        body: {
+          type: 'object',
+          required: ['status'],
+          properties: {
+            status: { type: 'string', enum: ['paid', 'failed'] },
+            referenceId: { type: 'string', maxLength: 255 },
+            notes: { type: 'string', maxLength: 1000 },
+          },
+        },
+      },
+    },
+    adminController.updatePayoutStatus,
+  )
+
+  app.get(
+    `${prefix}/astrologers/:id/payout-summary`,
+    {
+      preHandler: guard,
+      schema: {
+        tags: ['Admin'],
+        summary: 'Get total earnings / paid / pending balance for a single astrologer',
+        security: [{ bearerAuth: [] }],
+        params: { type: 'object', properties: { id: { type: 'string', format: 'uuid' } } },
+        response: {
+          200: {
+            type: 'object',
+            properties: {
+              totalEarnings: { type: 'string' },
+              totalPaid: { type: 'string' },
+              pendingAmount: { type: 'string' },
+              sessionCount: { type: 'integer' },
+            },
+          },
+        },
+      },
+    },
+    adminController.getAstrologerPayoutSummary,
+  )
 }

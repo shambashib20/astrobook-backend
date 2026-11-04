@@ -7,6 +7,7 @@ import {
   RequestAstrologerUpgradeSchema,
   SavePayoutDetailsSchema,
   SendPhoneOtpSchema,
+  UpdateAstrologerProfileSchema,
   UpdateProfileSchema,
   VerifyPhoneOtpSchema,
 } from '../schemas/user.schema'
@@ -76,6 +77,17 @@ export class UserController {
     const user = request.user as { userId: string }
     const status = await this.userService.getAstrologerApplicationStatus(user.userId)
     return reply.status(200).send(status)
+  }
+
+  /**
+   * PATCH /users/me/astrologer-profile
+   * Approved astrologer apna profile update kare (bio, experience, languages, specializations, photoUrl)
+   */
+  updateAstrologerProfile = async (request: FastifyRequest, reply: FastifyReply) => {
+    const user = request.user as { userId: string }
+    const dto = UpdateAstrologerProfileSchema.parse(request.body)
+    const updated = await this.userService.updateAstrologerProfile(user.userId, dto)
+    return reply.status(200).send({ success: true, data: updated })
   }
 
   /**

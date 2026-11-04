@@ -11,7 +11,7 @@ EXCEPTION
 END $$;
 --> statement-breakpoint
 DO $$ BEGIN
- CREATE TYPE "public"."appointment_status" AS ENUM('pending', 'confirmed', 'ongoing', 'completed', 'cancelled');
+ CREATE TYPE "public"."appointment_status" AS ENUM('pending', 'confirmed', 'ongoing', 'completed', 'cancelled', 'missed');
 EXCEPTION
  WHEN duplicate_object THEN null;
 END $$;
@@ -23,13 +23,49 @@ EXCEPTION
 END $$;
 --> statement-breakpoint
 DO $$ BEGIN
- CREATE TYPE "public"."payment_status" AS ENUM('pending', 'success', 'failed');
+ CREATE TYPE "public"."cancellation_initiated_by" AS ENUM('astrologer', 'user');
+EXCEPTION
+ WHEN duplicate_object THEN null;
+END $$;
+--> statement-breakpoint
+DO $$ BEGIN
+ CREATE TYPE "public"."cancellation_request_status" AS ENUM('pending', 'refunded', 'credited', 'timing_changed', 'admin_pending_money', 'admin_pending_wallet', 'admin_approved', 'admin_rejected');
+EXCEPTION
+ WHEN duplicate_object THEN null;
+END $$;
+--> statement-breakpoint
+DO $$ BEGIN
+ CREATE TYPE "public"."cancelled_by" AS ENUM('user', 'astrologer');
+EXCEPTION
+ WHEN duplicate_object THEN null;
+END $$;
+--> statement-breakpoint
+DO $$ BEGIN
+ CREATE TYPE "public"."payment_status" AS ENUM('pending', 'success', 'failed', 'refunded');
+EXCEPTION
+ WHEN duplicate_object THEN null;
+END $$;
+--> statement-breakpoint
+DO $$ BEGIN
+ CREATE TYPE "public"."payment_transaction_event" AS ENUM('order.created', 'payment.captured', 'payment.failed', 'payment.refunded', 'verify.success', 'verify.failed');
 EXCEPTION
  WHEN duplicate_object THEN null;
 END $$;
 --> statement-breakpoint
 DO $$ BEGIN
  CREATE TYPE "public"."service_request_status" AS ENUM('pending', 'accepted', 'rejected', 'expired');
+EXCEPTION
+ WHEN duplicate_object THEN null;
+END $$;
+--> statement-breakpoint
+DO $$ BEGIN
+ CREATE TYPE "public"."wallet_credit_source" AS ENUM('cancellation_refund', 'manual', 'booking_payment');
+EXCEPTION
+ WHEN duplicate_object THEN null;
+END $$;
+--> statement-breakpoint
+DO $$ BEGIN
+ CREATE TYPE "public"."wallet_credit_type" AS ENUM('credit', 'debit');
 EXCEPTION
  WHEN duplicate_object THEN null;
 END $$;
@@ -68,6 +104,9 @@ CREATE TABLE IF NOT EXISTS "astrologer_profiles" (
 	"verified_at" timestamp with time zone,
 	"verified_by" uuid,
 	"base_price" numeric(10, 2),
+	"payout_method" varchar(8),
+	"payout_details" jsonb,
+	"payout_details_updated_at" timestamp with time zone,
 	"razorpay_account_id" varchar(64),
 	"razorpay_account_status" varchar(32),
 	"razorpay_reference_id" varchar(128),
@@ -148,6 +187,8 @@ CREATE TABLE IF NOT EXISTS "appointments" (
 	"astrologer_joined_at" timestamp with time zone,
 	"reminder_sent_at" timestamp with time zone,
 	"status" "appointment_status" DEFAULT 'pending' NOT NULL,
+	"cancelled_by" "cancelled_by",
+	"rescheduled_count" smallint DEFAULT 0 NOT NULL,
 	"notes" text,
 	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
 	"updated_at" timestamp with time zone DEFAULT now() NOT NULL,
@@ -166,6 +207,22 @@ CREATE TABLE IF NOT EXISTS "availability_windows" (
 	"updated_at" timestamp with time zone DEFAULT now() NOT NULL,
 	"meta" jsonb,
 	CONSTRAINT "availability_windows_astrologer_id_date_start_time_end_time_unique" UNIQUE("astrologer_id","date","start_time","end_time")
+);
+--> statement-breakpoint
+CREATE TABLE IF NOT EXISTS "cancellation_requests" (
+	"id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
+	"appointment_id" uuid NOT NULL,
+	"user_id" uuid NOT NULL,
+	"amount" numeric(10, 2) NOT NULL,
+	"razorpay_payment_id" varchar(255),
+	"razorpay_order_id" varchar(255),
+	"deduction_amount" integer DEFAULT 0 NOT NULL,
+	"upi_id" varchar(255),
+	"status" "cancellation_request_status" DEFAULT 'pending' NOT NULL,
+	"initiated_by" "cancellation_initiated_by" DEFAULT 'astrologer' NOT NULL,
+	"expires_at" timestamp with time zone NOT NULL,
+	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
+	"updated_at" timestamp with time zone DEFAULT now() NOT NULL
 );
 --> statement-breakpoint
 CREATE TABLE IF NOT EXISTS "consultation_service_variants" (
@@ -196,16 +253,57 @@ CREATE TABLE IF NOT EXISTS "consultation_services" (
 	"meta" jsonb
 );
 --> statement-breakpoint
+CREATE TABLE IF NOT EXISTS "payment_transactions" (
+	"id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
+	"payment_id" uuid,
+	"appointment_id" uuid,
+	"user_id" uuid,
+	"astrologer_id" uuid,
+	"razorpay_order_id" varchar(255),
+	"razorpay_payment_id" varchar(255),
+	"event" "payment_transaction_event" NOT NULL,
+	"amount" numeric(10, 2) NOT NULL,
+	"currency" varchar(8) DEFAULT 'INR' NOT NULL,
+	"method" varchar(32),
+	"failure_code" varchar(64),
+	"failure_reason" text,
+	"razorpay_fee" numeric(10, 2),
+	"razorpay_tax" numeric(10, 2),
+	"captured_at" timestamp with time zone,
+	"raw_payload" jsonb,
+	"created_at" timestamp with time zone DEFAULT now() NOT NULL
+);
+--> statement-breakpoint
 CREATE TABLE IF NOT EXISTS "payments" (
 	"id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
 	"appointment_id" uuid NOT NULL,
+	"user_id" uuid,
+	"astrologer_id" uuid,
 	"razorpay_order_id" varchar(255),
 	"razorpay_payment_id" varchar(255),
 	"razorpay_signature" varchar(512),
 	"amount" numeric(10, 2) NOT NULL,
+	"currency" varchar(8) DEFAULT 'INR' NOT NULL,
+	"method" varchar(32),
+	"captured_at" timestamp with time zone,
+	"failure_code" varchar(64),
+	"failure_reason" text,
 	"status" "payment_status" DEFAULT 'pending' NOT NULL,
 	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
 	"updated_at" timestamp with time zone DEFAULT now() NOT NULL
+);
+--> statement-breakpoint
+CREATE TABLE IF NOT EXISTS "recurring_availability" (
+	"id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
+	"astrologer_id" uuid NOT NULL,
+	"day_of_week" smallint NOT NULL,
+	"start_time" time NOT NULL,
+	"end_time" time NOT NULL,
+	"timezone" varchar(64) DEFAULT 'Asia/Kolkata' NOT NULL,
+	"is_active" boolean DEFAULT true NOT NULL,
+	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
+	"updated_at" timestamp with time zone DEFAULT now() NOT NULL,
+	CONSTRAINT "recurring_availability_astrologer_id_day_of_week_start_time_end_time_unique" UNIQUE("astrologer_id","day_of_week","start_time","end_time")
 );
 --> statement-breakpoint
 CREATE TABLE IF NOT EXISTS "service_requests" (
@@ -223,6 +321,27 @@ CREATE TABLE IF NOT EXISTS "service_requests" (
 	"expires_at" timestamp with time zone
 );
 --> statement-breakpoint
+CREATE TABLE IF NOT EXISTS "slot_locks" (
+	"id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
+	"astrologer_id" uuid NOT NULL,
+	"slot_start" timestamp with time zone NOT NULL,
+	"locked_by" uuid NOT NULL,
+	"expires_at" timestamp with time zone NOT NULL,
+	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
+	CONSTRAINT "slot_locks_astrologer_id_slot_start_unique" UNIQUE("astrologer_id","slot_start")
+);
+--> statement-breakpoint
+CREATE TABLE IF NOT EXISTS "wallet_credits" (
+	"id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
+	"user_id" uuid NOT NULL,
+	"amount" numeric(10, 2) NOT NULL,
+	"type" "wallet_credit_type" NOT NULL,
+	"source" "wallet_credit_source" NOT NULL,
+	"cancellation_request_id" uuid,
+	"description" text,
+	"created_at" timestamp with time zone DEFAULT now() NOT NULL
+);
+--> statement-breakpoint
 CREATE TABLE IF NOT EXISTS "cart_items" (
 	"id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
 	"user_id" uuid NOT NULL,
@@ -231,7 +350,8 @@ CREATE TABLE IF NOT EXISTS "cart_items" (
 	"variant_id" uuid,
 	"scheduled_at" timestamp with time zone,
 	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
-	"updated_at" timestamp with time zone DEFAULT now() NOT NULL
+	"updated_at" timestamp with time zone DEFAULT now() NOT NULL,
+	CONSTRAINT "cart_items_user_service_unique" UNIQUE("user_id","service_id")
 );
 --> statement-breakpoint
 CREATE TABLE IF NOT EXISTS "push_tokens" (
@@ -269,6 +389,11 @@ CREATE TABLE IF NOT EXISTS "posts" (
 	"bg_color" text,
 	"text_color" text,
 	"duration_seconds" integer,
+	"sticker_text" text,
+	"sticker_x" numeric(5, 4),
+	"sticker_y" numeric(5, 4),
+	"sticker_text_color" text,
+	"sticker_bg_color" text,
 	"linked_service_id" uuid,
 	"tags" text[] DEFAULT '{}'::text[] NOT NULL,
 	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
@@ -291,6 +416,49 @@ CREATE TABLE IF NOT EXISTS "notifications" (
 	"post_id" uuid,
 	"is_read" boolean DEFAULT false NOT NULL,
 	"created_at" timestamp with time zone DEFAULT now() NOT NULL
+);
+--> statement-breakpoint
+CREATE TABLE IF NOT EXISTS "favorites" (
+	"id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
+	"user_id" uuid NOT NULL,
+	"item_type" varchar(32) NOT NULL,
+	"item_id" uuid NOT NULL,
+	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
+	CONSTRAINT "favorites_user_item_unique" UNIQUE("user_id","item_type","item_id")
+);
+--> statement-breakpoint
+CREATE TABLE IF NOT EXISTS "reviews" (
+	"id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
+	"appointment_id" uuid NOT NULL,
+	"user_id" uuid NOT NULL,
+	"astrologer_id" uuid NOT NULL,
+	"rating" smallint NOT NULL,
+	"comment" text,
+	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
+	"updated_at" timestamp with time zone DEFAULT now() NOT NULL,
+	CONSTRAINT "reviews_appointment_id_unique" UNIQUE("appointment_id")
+);
+--> statement-breakpoint
+CREATE TABLE IF NOT EXISTS "category_media" (
+	"id" text PRIMARY KEY NOT NULL,
+	"hero_video_url" text,
+	"hero_image_url" text,
+	"updated_at" timestamp with time zone DEFAULT now() NOT NULL
+);
+--> statement-breakpoint
+CREATE TABLE IF NOT EXISTS "payout_records" (
+	"id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
+	"astrologer_id" uuid NOT NULL,
+	"amount" numeric(12, 2) NOT NULL,
+	"status" varchar(10) DEFAULT 'pending' NOT NULL,
+	"payout_method" varchar(8),
+	"reference_id" varchar(255),
+	"notes" text,
+	"period_from" timestamp with time zone,
+	"period_to" timestamp with time zone,
+	"created_by" uuid,
+	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
+	"updated_at" timestamp with time zone DEFAULT now() NOT NULL
 );
 --> statement-breakpoint
 DO $$ BEGIN
@@ -348,6 +516,18 @@ EXCEPTION
 END $$;
 --> statement-breakpoint
 DO $$ BEGIN
+ ALTER TABLE "cancellation_requests" ADD CONSTRAINT "cancellation_requests_appointment_id_appointments_id_fk" FOREIGN KEY ("appointment_id") REFERENCES "public"."appointments"("id") ON DELETE cascade ON UPDATE no action;
+EXCEPTION
+ WHEN duplicate_object THEN null;
+END $$;
+--> statement-breakpoint
+DO $$ BEGIN
+ ALTER TABLE "cancellation_requests" ADD CONSTRAINT "cancellation_requests_user_id_users_id_fk" FOREIGN KEY ("user_id") REFERENCES "public"."users"("id") ON DELETE cascade ON UPDATE no action;
+EXCEPTION
+ WHEN duplicate_object THEN null;
+END $$;
+--> statement-breakpoint
+DO $$ BEGIN
  ALTER TABLE "consultation_service_variants" ADD CONSTRAINT "consultation_service_variants_service_id_consultation_services_id_fk" FOREIGN KEY ("service_id") REFERENCES "public"."consultation_services"("id") ON DELETE cascade ON UPDATE no action;
 EXCEPTION
  WHEN duplicate_object THEN null;
@@ -360,7 +540,49 @@ EXCEPTION
 END $$;
 --> statement-breakpoint
 DO $$ BEGIN
+ ALTER TABLE "payment_transactions" ADD CONSTRAINT "payment_transactions_payment_id_payments_id_fk" FOREIGN KEY ("payment_id") REFERENCES "public"."payments"("id") ON DELETE set null ON UPDATE no action;
+EXCEPTION
+ WHEN duplicate_object THEN null;
+END $$;
+--> statement-breakpoint
+DO $$ BEGIN
+ ALTER TABLE "payment_transactions" ADD CONSTRAINT "payment_transactions_appointment_id_appointments_id_fk" FOREIGN KEY ("appointment_id") REFERENCES "public"."appointments"("id") ON DELETE set null ON UPDATE no action;
+EXCEPTION
+ WHEN duplicate_object THEN null;
+END $$;
+--> statement-breakpoint
+DO $$ BEGIN
+ ALTER TABLE "payment_transactions" ADD CONSTRAINT "payment_transactions_user_id_users_id_fk" FOREIGN KEY ("user_id") REFERENCES "public"."users"("id") ON DELETE set null ON UPDATE no action;
+EXCEPTION
+ WHEN duplicate_object THEN null;
+END $$;
+--> statement-breakpoint
+DO $$ BEGIN
+ ALTER TABLE "payment_transactions" ADD CONSTRAINT "payment_transactions_astrologer_id_users_id_fk" FOREIGN KEY ("astrologer_id") REFERENCES "public"."users"("id") ON DELETE set null ON UPDATE no action;
+EXCEPTION
+ WHEN duplicate_object THEN null;
+END $$;
+--> statement-breakpoint
+DO $$ BEGIN
  ALTER TABLE "payments" ADD CONSTRAINT "payments_appointment_id_appointments_id_fk" FOREIGN KEY ("appointment_id") REFERENCES "public"."appointments"("id") ON DELETE cascade ON UPDATE no action;
+EXCEPTION
+ WHEN duplicate_object THEN null;
+END $$;
+--> statement-breakpoint
+DO $$ BEGIN
+ ALTER TABLE "payments" ADD CONSTRAINT "payments_user_id_users_id_fk" FOREIGN KEY ("user_id") REFERENCES "public"."users"("id") ON DELETE set null ON UPDATE no action;
+EXCEPTION
+ WHEN duplicate_object THEN null;
+END $$;
+--> statement-breakpoint
+DO $$ BEGIN
+ ALTER TABLE "payments" ADD CONSTRAINT "payments_astrologer_id_users_id_fk" FOREIGN KEY ("astrologer_id") REFERENCES "public"."users"("id") ON DELETE set null ON UPDATE no action;
+EXCEPTION
+ WHEN duplicate_object THEN null;
+END $$;
+--> statement-breakpoint
+DO $$ BEGIN
+ ALTER TABLE "recurring_availability" ADD CONSTRAINT "recurring_availability_astrologer_id_users_id_fk" FOREIGN KEY ("astrologer_id") REFERENCES "public"."users"("id") ON DELETE cascade ON UPDATE no action;
 EXCEPTION
  WHEN duplicate_object THEN null;
 END $$;
@@ -397,6 +619,30 @@ END $$;
 --> statement-breakpoint
 DO $$ BEGIN
  ALTER TABLE "service_requests" ADD CONSTRAINT "service_requests_child_appointment_id_appointments_id_fk" FOREIGN KEY ("child_appointment_id") REFERENCES "public"."appointments"("id") ON DELETE set null ON UPDATE no action;
+EXCEPTION
+ WHEN duplicate_object THEN null;
+END $$;
+--> statement-breakpoint
+DO $$ BEGIN
+ ALTER TABLE "slot_locks" ADD CONSTRAINT "slot_locks_astrologer_id_users_id_fk" FOREIGN KEY ("astrologer_id") REFERENCES "public"."users"("id") ON DELETE cascade ON UPDATE no action;
+EXCEPTION
+ WHEN duplicate_object THEN null;
+END $$;
+--> statement-breakpoint
+DO $$ BEGIN
+ ALTER TABLE "slot_locks" ADD CONSTRAINT "slot_locks_locked_by_users_id_fk" FOREIGN KEY ("locked_by") REFERENCES "public"."users"("id") ON DELETE cascade ON UPDATE no action;
+EXCEPTION
+ WHEN duplicate_object THEN null;
+END $$;
+--> statement-breakpoint
+DO $$ BEGIN
+ ALTER TABLE "wallet_credits" ADD CONSTRAINT "wallet_credits_user_id_users_id_fk" FOREIGN KEY ("user_id") REFERENCES "public"."users"("id") ON DELETE cascade ON UPDATE no action;
+EXCEPTION
+ WHEN duplicate_object THEN null;
+END $$;
+--> statement-breakpoint
+DO $$ BEGIN
+ ALTER TABLE "wallet_credits" ADD CONSTRAINT "wallet_credits_cancellation_request_id_cancellation_requests_id_fk" FOREIGN KEY ("cancellation_request_id") REFERENCES "public"."cancellation_requests"("id") ON DELETE set null ON UPDATE no action;
 EXCEPTION
  WHEN duplicate_object THEN null;
 END $$;
@@ -491,6 +737,42 @@ EXCEPTION
  WHEN duplicate_object THEN null;
 END $$;
 --> statement-breakpoint
+DO $$ BEGIN
+ ALTER TABLE "favorites" ADD CONSTRAINT "favorites_user_id_users_id_fk" FOREIGN KEY ("user_id") REFERENCES "public"."users"("id") ON DELETE cascade ON UPDATE no action;
+EXCEPTION
+ WHEN duplicate_object THEN null;
+END $$;
+--> statement-breakpoint
+DO $$ BEGIN
+ ALTER TABLE "reviews" ADD CONSTRAINT "reviews_appointment_id_appointments_id_fk" FOREIGN KEY ("appointment_id") REFERENCES "public"."appointments"("id") ON DELETE cascade ON UPDATE no action;
+EXCEPTION
+ WHEN duplicate_object THEN null;
+END $$;
+--> statement-breakpoint
+DO $$ BEGIN
+ ALTER TABLE "reviews" ADD CONSTRAINT "reviews_user_id_users_id_fk" FOREIGN KEY ("user_id") REFERENCES "public"."users"("id") ON DELETE cascade ON UPDATE no action;
+EXCEPTION
+ WHEN duplicate_object THEN null;
+END $$;
+--> statement-breakpoint
+DO $$ BEGIN
+ ALTER TABLE "reviews" ADD CONSTRAINT "reviews_astrologer_id_users_id_fk" FOREIGN KEY ("astrologer_id") REFERENCES "public"."users"("id") ON DELETE cascade ON UPDATE no action;
+EXCEPTION
+ WHEN duplicate_object THEN null;
+END $$;
+--> statement-breakpoint
+DO $$ BEGIN
+ ALTER TABLE "payout_records" ADD CONSTRAINT "payout_records_astrologer_id_users_id_fk" FOREIGN KEY ("astrologer_id") REFERENCES "public"."users"("id") ON DELETE cascade ON UPDATE no action;
+EXCEPTION
+ WHEN duplicate_object THEN null;
+END $$;
+--> statement-breakpoint
+DO $$ BEGIN
+ ALTER TABLE "payout_records" ADD CONSTRAINT "payout_records_created_by_users_id_fk" FOREIGN KEY ("created_by") REFERENCES "public"."users"("id") ON DELETE set null ON UPDATE no action;
+EXCEPTION
+ WHEN duplicate_object THEN null;
+END $$;
+--> statement-breakpoint
 CREATE INDEX IF NOT EXISTS "otp_verifications_phone_idx" ON "otp_verifications" USING btree ("phone");--> statement-breakpoint
 CREATE INDEX IF NOT EXISTS "otp_verifications_phone_created_at_idx" ON "otp_verifications" USING btree ("phone","created_at");--> statement-breakpoint
 CREATE INDEX IF NOT EXISTS "users_is_astrologer_idx" ON "users" USING btree ("is_astrologer") WHERE "users"."is_astrologer" = true;--> statement-breakpoint
@@ -500,12 +782,23 @@ CREATE INDEX IF NOT EXISTS "appointments_user_id_idx" ON "appointments" USING bt
 CREATE INDEX IF NOT EXISTS "appointments_astrologer_id_scheduled_at_idx" ON "appointments" USING btree ("astrologer_id","scheduled_at");--> statement-breakpoint
 CREATE INDEX IF NOT EXISTS "appointments_service_id_idx" ON "appointments" USING btree ("service_id");--> statement-breakpoint
 CREATE INDEX IF NOT EXISTS "appointments_parent_id_idx" ON "appointments" USING btree ("parent_id");--> statement-breakpoint
+CREATE INDEX IF NOT EXISTS "cancellation_requests_appointment_id_idx" ON "cancellation_requests" USING btree ("appointment_id");--> statement-breakpoint
+CREATE INDEX IF NOT EXISTS "cancellation_requests_user_id_idx" ON "cancellation_requests" USING btree ("user_id");--> statement-breakpoint
+CREATE INDEX IF NOT EXISTS "cancellation_requests_status_expires_at_idx" ON "cancellation_requests" USING btree ("status","expires_at");--> statement-breakpoint
 CREATE INDEX IF NOT EXISTS "consultation_services_astrologer_id_idx" ON "consultation_services" USING btree ("astrologer_id");--> statement-breakpoint
 CREATE INDEX IF NOT EXISTS "consultation_services_tags_gin_idx" ON "consultation_services" USING gin ("tags");--> statement-breakpoint
+CREATE INDEX IF NOT EXISTS "payment_transactions_order_id_idx" ON "payment_transactions" USING btree ("razorpay_order_id");--> statement-breakpoint
+CREATE INDEX IF NOT EXISTS "payment_transactions_user_id_idx" ON "payment_transactions" USING btree ("user_id");--> statement-breakpoint
+CREATE INDEX IF NOT EXISTS "payment_transactions_astrologer_id_idx" ON "payment_transactions" USING btree ("astrologer_id");--> statement-breakpoint
+CREATE INDEX IF NOT EXISTS "payment_transactions_appointment_id_idx" ON "payment_transactions" USING btree ("appointment_id");--> statement-breakpoint
 CREATE INDEX IF NOT EXISTS "payments_appointment_id_idx" ON "payments" USING btree ("appointment_id");--> statement-breakpoint
+CREATE INDEX IF NOT EXISTS "payments_user_id_idx" ON "payments" USING btree ("user_id");--> statement-breakpoint
+CREATE INDEX IF NOT EXISTS "payments_astrologer_id_idx" ON "payments" USING btree ("astrologer_id");--> statement-breakpoint
 CREATE INDEX IF NOT EXISTS "service_requests_parent_appointment_id_idx" ON "service_requests" USING btree ("parent_appointment_id");--> statement-breakpoint
 CREATE INDEX IF NOT EXISTS "service_requests_astrologer_id_idx" ON "service_requests" USING btree ("astrologer_id");--> statement-breakpoint
 CREATE INDEX IF NOT EXISTS "service_requests_user_id_idx" ON "service_requests" USING btree ("user_id");--> statement-breakpoint
+CREATE INDEX IF NOT EXISTS "wallet_credits_user_id_idx" ON "wallet_credits" USING btree ("user_id");--> statement-breakpoint
+CREATE INDEX IF NOT EXISTS "wallet_credits_cancellation_request_id_idx" ON "wallet_credits" USING btree ("cancellation_request_id");--> statement-breakpoint
 CREATE INDEX IF NOT EXISTS "cart_items_user_id_idx" ON "cart_items" USING btree ("user_id");--> statement-breakpoint
 CREATE INDEX IF NOT EXISTS "post_comments_post_id_created_at_idx" ON "post_comments" USING btree ("post_id","created_at");--> statement-breakpoint
 CREATE INDEX IF NOT EXISTS "post_likes_user_id_idx" ON "post_likes" USING btree ("user_id");--> statement-breakpoint
@@ -513,4 +806,10 @@ CREATE INDEX IF NOT EXISTS "posts_astrologer_id_created_at_idx" ON "posts" USING
 CREATE INDEX IF NOT EXISTS "posts_tags_gin_idx" ON "posts" USING gin ("tags");--> statement-breakpoint
 CREATE INDEX IF NOT EXISTS "follows_following_id_idx" ON "follows" USING btree ("following_id");--> statement-breakpoint
 CREATE INDEX IF NOT EXISTS "notifications_user_id_created_at_idx" ON "notifications" USING btree ("user_id","created_at");--> statement-breakpoint
-CREATE INDEX IF NOT EXISTS "notifications_created_at_idx" ON "notifications" USING btree ("created_at");
+CREATE INDEX IF NOT EXISTS "notifications_created_at_idx" ON "notifications" USING btree ("created_at");--> statement-breakpoint
+CREATE INDEX IF NOT EXISTS "favorites_user_created_at_idx" ON "favorites" USING btree ("user_id","created_at");--> statement-breakpoint
+CREATE INDEX IF NOT EXISTS "reviews_astrologer_created_at_idx" ON "reviews" USING btree ("astrologer_id","created_at");--> statement-breakpoint
+CREATE INDEX IF NOT EXISTS "reviews_user_id_idx" ON "reviews" USING btree ("user_id");--> statement-breakpoint
+CREATE INDEX IF NOT EXISTS "payout_records_astrologer_idx" ON "payout_records" USING btree ("astrologer_id");--> statement-breakpoint
+CREATE INDEX IF NOT EXISTS "payout_records_status_idx" ON "payout_records" USING btree ("status");--> statement-breakpoint
+CREATE INDEX IF NOT EXISTS "payout_records_created_at_idx" ON "payout_records" USING btree ("created_at");

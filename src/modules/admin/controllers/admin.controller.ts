@@ -1,13 +1,17 @@
 import type { FastifyReply, FastifyRequest } from 'fastify'
 import {
   BanUserSchema,
+  CreatePayoutSchema,
   EarningsQuerySchema,
   ListAppointmentsQuerySchema,
   ListAstrologersQuerySchema,
+  ListLogsQuerySchema,
+  ListPayoutsQuerySchema,
   ListPostsQuerySchema,
   ListUsersQuerySchema,
   UpdateCommissionSchema,
   UpdateDocumentsSchema,
+  UpdatePayoutStatusSchema,
   UpdateUserRoleSchema,
   UpdateVerificationSchema,
 } from '../schemas/admin.schema'
@@ -39,9 +43,10 @@ export class AdminController {
     return reply.status(200).send(health)
   }
 
-  // GET /admin/upload-token
+  // GET /admin/upload-token (no-store to prevent browser caching same token)
   getUploadToken = async (_request: FastifyRequest, reply: FastifyReply) => {
     const token = this.adminService.getImageKitAuthToken()
+    reply.header('Cache-Control', 'no-store')
     return reply.status(200).send(token)
   }
 
@@ -208,5 +213,46 @@ export class AdminController {
       appointmentId: q.appointmentId,
     })
     return reply.status(200).send(result)
+  }
+
+  // ── Logs ──────────────────────────────────────────────────────────────────
+
+  // GET /admin/logs
+  getLogs = async (request: FastifyRequest, reply: FastifyReply) => {
+    const query = ListLogsQuerySchema.parse(request.query)
+    const result = this.adminService.getLogs(query)
+    return reply.status(200).send(result)
+  }
+
+  // ── Payouts ───────────────────────────────────────────────────────────────
+
+  // GET /admin/payouts
+  listPayouts = async (request: FastifyRequest, reply: FastifyReply) => {
+    const query = ListPayoutsQuerySchema.parse(request.query)
+    const result = await this.adminService.listPayouts(query)
+    return reply.status(200).send(result)
+  }
+
+  // POST /admin/payouts
+  createPayout = async (request: FastifyRequest, reply: FastifyReply) => {
+    const admin = request.user as AuthedUser
+    const dto = CreatePayoutSchema.parse(request.body)
+    const record = await this.adminService.createPayout(admin.userId, dto)
+    return reply.status(201).send({ message: 'Payout record created', payout: record })
+  }
+
+  // PATCH /admin/payouts/:id
+  updatePayoutStatus = async (request: FastifyRequest, reply: FastifyReply) => {
+    const { id } = request.params as { id: string }
+    const dto = UpdatePayoutStatusSchema.parse(request.body)
+    const result = await this.adminService.updatePayoutStatus(id, dto)
+    return reply.status(200).send({ message: `Payout marked as ${dto.status}`, ...result })
+  }
+
+  // GET /admin/astrologers/:id/payout-summary
+  getAstrologerPayoutSummary = async (request: FastifyRequest, reply: FastifyReply) => {
+    const { id } = request.params as { id: string }
+    const summary = await this.adminService.getAstrologerPayoutSummary(id)
+    return reply.status(200).send(summary)
   }
 }
